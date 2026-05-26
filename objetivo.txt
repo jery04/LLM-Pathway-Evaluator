@@ -1,0 +1,534 @@
+El objetivo es:  Exploración de 
+trayectorias 
+profesionales alternativas
+Dado un conjunto de decisiones posibles en una 
+carrera profesional, generar y evaluar múltiples 
+trayectorias válidas bajo distintos criterios.  
+El sistema debe utilizar un LLM para analizar y 
+comparar cualitativamente las trayectorias generadas.
+Desarrollar un sistema que resuelva un problema de optimización, planificación,
+satisfacción de restricciones, ... mediante técnicas y herramientas dadas en la asignatura,
+incorporando un modelo de lenguaje (LLM) como parte funcional del sistema
+
+
+Haz esto:
+ahí te pase conferecnia 6,7,8 por si te sirve de algo tomar de referencia. Tengo que hacer un proyecto, ahí esta todo explicado en el pdf orientacion, de los tantos temoas que hay yo seleccioné el tema 7:Exploración de 
+trayectorias 
+profesionales alternativas
+
+Explicame de que va, como lo tengo que hacer que me recomiendas hazme una base explicame todo no se nada de nada
+
+Ya revisé el PDF de orientación y tu tema 7: “Exploración de trayectorias profesionales alternativas”. Además, la conferencia de planificación sí te sirve bastante como referencia conceptual, porque este tema en el fondo es un problema de planificación/búsqueda con restricciones.
+
+Voy a explicártelo desde cero, como si no supieras nada (porque dijiste que no sabes nada de nada 😄), y además te voy a proponer una base sólida que sea realizable y que tenga buena nota.
+
+1. ¿Qué demonios significa el tema 7?
+
+El enunciado dice:
+
+“Dado un conjunto de decisiones posibles en una carrera profesional, generar y evaluar múltiples trayectorias válidas bajo distintos criterios. El sistema debe utilizar un LLM para analizar y comparar cualitativamente las trayectorias generadas.”
+
+Traducido a español normal:
+
+Tú vas a construir un sistema que responda algo como:
+
+“Quiero ser Data Scientist”
+“Sé Python”
+“Tengo poco tiempo”
+“No me gusta matemática avanzada”
+
+Y el sistema generará varias rutas profesionales posibles.
+
+Ejemplo:
+
+Ruta 1 — Rápida al empleo
+
+Python → SQL → Data Analysis → Power BI → Junior Data Analyst
+
+Ruta 2 — Más técnica
+
+Python → Estadística → Machine Learning → Deep Learning → Data Scientist
+
+Ruta 3 — Orientada a software
+
+Python → Backend → APIs → MLOps → AI Engineer
+
+Y después el sistema debe compararlas:
+
+cuál es más rápida,
+cuál requiere más esfuerzo,
+cuál tiene más flexibilidad,
+cuál da mejores oportunidades,
+etc.
+
+Y aquí entra el LLM (ChatGPT, Gemini, Llama, etc.):
+
+El LLM no hace el algoritmo principal. El LLM ayuda a:
+
+entender objetivos escritos en lenguaje natural,
+interpretar preferencias del usuario,
+comparar trayectorias cualitativamente.
+
+Eso lo pide explícitamente el proyecto.
+
+2. ¿Qué tipo de IA es esto?
+
+Esto NO es Machine Learning.
+
+Esto es más:
+
+Planificación
+Búsqueda
+Satisfacción de restricciones
+Optimización
+
+Como en la conferencia 6.
+
+Piensa en esto:
+
+Una trayectoria profesional es una secuencia de decisiones.
+
+Ejemplo:
+
+Python
+↓
+Data Structures
+↓
+Machine Learning
+↓
+Deep Learning
+↓
+AI Engineer
+
+Eso es literalmente un plan.
+
+En planificación tienes:
+
+estado inicial,
+acciones,
+restricciones,
+estado objetivo.
+
+Igual que el mono y las bananas de STRIPS.
+
+3. Cómo modelarlo formalmente (esta parte da MUCHOS puntos)
+
+Esta es la parte importante del informe técnico.
+
+Tu problema podría modelarse así:
+
+Estado inicial
+
+Lo que el usuario ya tiene.
+
+Ejemplo:
+
+skills = {Python básico}
+tiempo = 8 horas/semana
+interés = IA
+Estado objetivo
+
+El trabajo deseado.
+
+Ejemplo:
+
+Objetivo = Machine Learning Engineer
+Acciones
+
+Las acciones son:
+
+aprender algo
+
+Ejemplo:
+
+Aprender(SQL)
+Aprender(Álgebra Lineal)
+Aprender(Machine Learning)
+Tomar(Curso de Deep Learning)
+
+Cada acción cambia el estado.
+
+Ejemplo:
+
+Antes:
+
+skills = {Python}
+
+Después de:
+
+Aprender(SQL)
+
+Estado:
+
+skills = {Python, SQL}
+Restricciones
+
+Aquí está la gracia.
+
+Ejemplo:
+
+No puedes aprender:
+
+Machine Learning
+
+sin:
+
+Python
++
+Estadística
+
+Eso es un prerrequisito.
+
+Ejemplo formal:
+
+ML requiere:
+{Python, Estadística}
+
+También puedes tener:
+
+tiempo
+máximo 6 meses
+presupuesto
+máximo 500 USD
+preferencias
+no matemática pesada
+4. La mejor idea de proyecto (mi recomendación)
+
+Te voy a recomendar una versión inteligente pero realizable.
+
+Proyecto:
+Career Path Explorer AI
+
+Un sistema que:
+
+recibe un objetivo profesional,
+recibe habilidades actuales,
+genera múltiples trayectorias válidas,
+optimiza bajo distintos criterios,
+usa LLM para comparar rutas.
+Entrada
+
+Ejemplo:
+
+{
+  "objetivo": "AI Engineer",
+  "skills_actuales": [
+    "Python"
+  ],
+  "tiempo_semanal": 10,
+  "preferencias": [
+    "rápido empleo",
+    "evitar demasiada matemática"
+  ]
+}
+Base de conocimiento
+
+Necesitas un grafo.
+
+Ejemplo:
+
+Python
+ ├── SQL
+ ├── Data Structures
+ └── Statistics
+
+Statistics
+ └── Machine Learning
+
+Machine Learning
+ └── Deep Learning
+
+Deep Learning
+ └── AI Engineer
+
+Esto es un grafo dirigido con dependencias.
+
+Muy parecido a prerequisitos universitarios.
+
+5. Qué algoritmo usar
+
+Aquí está la decisión importante.
+
+Puedes hacerlo de varias maneras.
+
+Opción 1 — BFS/DFS (simple)
+
+Generas todas las rutas válidas.
+
+Pero explota rápido.
+
+No recomiendo.
+
+Opción 2 — A* (muy buena)
+
+La conferencia habla de búsqueda heurística con A*.
+
+Tu heurística puede ser:
+
+costo_restante_estimado
+
+Ejemplo:
+
+Costo =
+
+tiempo
++
+dificultad
++
+precio
+
+A* te encuentra rutas buenas rápido.
+
+Esto da puntos porque conecta con planificación IA.
+
+Opción 3 — CSP / restricciones (MUY buena para nota)
+
+Como el tema menciona restricciones, puedes formular:
+
+Variables:
+
+curso_1
+curso_2
+curso_3
+...
+
+Restricciones:
+
+prerrequisitos
+orden válido
+límite tiempo
+
+Pero esto es más complejo.
+
+Mi recomendación real:
+
+Haz:
+
+grafo + búsqueda heurística (A*)
+
+Es elegante y alcanzable.
+
+6. Cómo entra el LLM (MUY IMPORTANTE)
+
+Esto es obligatorio en el proyecto.
+
+Muchos estudiantes fallarán aquí porque harán un “adorno”.
+
+Tú no.
+
+El LLM debe ser funcional.
+
+Uso 1 — Interpretar objetivos
+
+Usuario escribe:
+
+“Quiero trabajar en IA pero sin tanta matemática”
+
+LLM traduce eso a:
+
+{
+ "goal": "AI Engineer",
+ "avoid_math": true,
+ "priority": "practical"
+}
+Uso 2 — Comparar rutas
+
+El algoritmo genera:
+
+Ruta A:
+
+Python → SQL → Data Analysis
+
+Ruta B:
+
+Python → Statistics → ML
+
+LLM responde:
+
+La ruta A es más rápida para inserción laboral, mientras que la B ofrece una base técnica más sólida para roles avanzados en IA.
+
+Eso es exactamente lo que pide el tema.
+
+Uso 3 — Explicar recomendaciones
+
+En vez de:
+
+score=0.83
+
+El usuario ve:
+
+Se recomienda esta trayectoria porque aprovecha tus conocimientos previos en Python y minimiza prerequisitos matemáticos.
+
+Eso queda súper profesional.
+
+7. Dataset (otro dolor de cabeza resuelto)
+
+El PDF pide dataset.
+
+No necesitas dataset gigante.
+
+Puedes generarlo tú.
+
+Ejemplo:
+
+{
+ "nombre": "Machine Learning",
+ "prerequisitos": [
+   "Python",
+   "Statistics"
+ ],
+ "duracion": 8,
+ "dificultad": 7,
+ "categoria": "IA"
+}
+
+Haz unos:
+
+40–80 cursos/habilidades
+
+en:
+
+IA
+desarrollo web
+backend
+cloud
+ciberseguridad
+ciencia de datos
+
+Eso basta.
+
+Y en el informe dices:
+
+El dataset fue generado manualmente simulando dependencias reales del mercado profesional.
+
+Eso es válido según el PDF.
+
+8. Arquitectura recomendada
+
+Hazlo simple.
+
+Usuario
+   ↓
+Input natural
+   ↓
+LLM interpreta intención
+   ↓
+Motor de planificación
+(grafo + búsqueda)
+   ↓
+Generación de rutas
+   ↓
+LLM compara
+   ↓
+Resultado final
+9. Tecnologías que te recomiendo
+
+Como eres de CS y programas:
+
+Backend
+
+Python
+
+Porque IA + grafos + APIs es más fácil.
+
+Librerías
+
+Para grafo:
+
+networkx
+
+Para búsqueda:
+
+heapq
+
+o A* manual.
+
+Para LLM:
+
+API de OpenAI
+o modelo local.
+
+Para interfaz:
+
+si quieres algo rápido:
+
+streamlit
+
+queda bonito en 1 día.
+
+10. Qué entregable haría yo para sacar buena nota
+
+Yo haría esto:
+
+Caso
+
+Explorador de trayectorias en tech.
+
+Profesiones:
+
+AI Engineer
+Data Scientist
+Backend Engineer
+Cybersecurity Analyst
+Cloud Engineer
+Algoritmo
+
+A* sobre grafo de prerequisitos.
+
+Restricciones
+tiempo máximo,
+presupuesto,
+dificultad,
+evitar matemáticas,
+rapidez laboral.
+Salida
+
+3–5 trayectorias alternativas.
+
+Ejemplo:
+
+Ruta rápida
+
+6 meses
+
+Ruta balanceada
+
+10 meses
+
+Ruta experta
+
+18 meses
+
+LLM
+interpreta objetivo,
+explica decisiones,
+compara trayectorias.
+11. Lo más importante: qué NO hacer
+
+No hagas esto:
+
+“Le mando todo al LLM y que invente rutas”
+
+Eso te puede bajar la nota.
+
+Porque el proyecto pide:
+
+resolver el problema mediante técnicas de la asignatura incorporando un LLM como parte funcional.
+
+El corazón debe ser:
+
+algoritmo IA clásico.
+
+El LLM es un componente auxiliar inteligente.
+
+Tu tema, bien hecho, puede quedar bastante fuerte porque conecta:
+
+planificación,
+búsqueda heurística,
+grafos,
+restricciones,
+NLP/LLM.
+
+Y además se ve muy “real-world”.
+
+Si quieres, en el siguiente mensaje te puedo hacer ya la propuesta completa del proyecto (arquitectura, modelo formal, algoritmo, dataset y cronograma) como si ya fueras a empezarlo mañana.
