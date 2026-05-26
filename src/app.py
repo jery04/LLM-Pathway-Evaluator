@@ -1,15 +1,34 @@
 import streamlit as st
 from typing import List
-
-try:
-    from planner import load_courses, generate_paths
-    from llm_adapter import parse_input, explain_comparison
-except ModuleNotFoundError:
-    from src.planner import load_courses, generate_paths
-    from src.llm_adapter import parse_input, explain_comparison
+from pathlib import Path
+import importlib.util
+import types
 
 
-@st.cache_data
+def _load_local_module(module_name: str, rel_path: str) -> types.ModuleType:
+    """Load a module from the repository file to guarantee we import local code.
+
+    This avoids accidentally importing third-party packages named the same
+    (for example `planner`) when the app is run with a different interpreter
+    or via `streamlit run` outside the virtualenv.
+    """
+    repo_root = Path(__file__).resolve().parent
+    file_path = repo_root / rel_path
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Always load the local modules by file path to be robust across environments.
+_planner = _load_local_module('local_planner', 'planner.py')
+_llm = _load_local_module('local_llm_adapter', 'llm_adapter.py')
+
+load_courses = _planner.load_courses
+generate_paths = _planner.generate_paths
+parse_input = _llm.parse_input
+explain_comparison = _llm.explain_comparison
+
 def load_data():
     return load_courses()
 
@@ -24,7 +43,7 @@ def main():
     course_names = [c['nombre'] for c in courses]
 
     if not course_names:
-        st.error('No se pudieron cargar cursos desde Kaggle. Revisa que tengas kagglehub instalado y acceso al dataset.')
+        st.error('No se pudieron cargar cursos desde los datos locales ni desde Kaggle. Revisa la carpeta data/ y, si hace falta, el acceso a kagglehub.')
         return
 
     default_skills = ['Python'] if 'Python' in course_names else [course_names[0]]

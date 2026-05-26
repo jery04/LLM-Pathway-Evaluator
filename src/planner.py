@@ -15,6 +15,14 @@ def load_courses(path: Optional[str] = None) -> List[Dict]:
         if candidate.exists():
             return _finalize_records(_load_records_from_path(candidate))
 
+    # First try to load any local data shipped with the repository (data/*.csv, json, jsonl).
+    local_data_dir = Path(__file__).resolve().parent.parent / "data"
+    if local_data_dir.exists():
+        local_records = _load_records_from_path(local_data_dir)
+        if local_records:
+            return _finalize_records(local_records)
+
+    # Fall back to attempting to download via kagglehub if local data isn't available.
     downloaded = _load_kaggle_dataset(KAGGLE_DATASET_ID)
 
     return _finalize_records(downloaded)
@@ -74,9 +82,13 @@ def _finalize_records(records: List[Dict]) -> List[Dict]:
             normalized.append(candidate)
 
     idx = index_courses(normalized)
-    inferred = _infer_missing_prerequisites(normalized, idx)
-    for name, prereqs in inferred.items():
-        idx[name]['prerequisitos'] = prereqs
+    # For large source datasets, skip expensive prerequisite inference so the
+    # app can load quickly from the bundled CSVs. The course graph still works
+    # with explicit prerequisites when present in the source data.
+    if len(normalized) <= 2000:
+        inferred = _infer_missing_prerequisites(normalized, idx)
+        for name, prereqs in inferred.items():
+            idx[name]['prerequisitos'] = prereqs
 
     return list(idx.values())
 
@@ -155,7 +167,8 @@ def _infer_prereqs_for_record(record: Dict, by_category: Dict[str, List[Dict]]) 
 def _normalize_record(record: Dict) -> Dict:
     source = {str(key).strip().lower(): value for key, value in dict(record).items()}
 
-    nombre = _first_present(source, ['nombre', 'name', 'course_name', 'course title', 'title', 'course_title'])
+    # Accept a wider set of possible field names coming from different CSVs
+    nombre = _first_present(source, ['nombre', 'name', 'course', 'course_name', 'course title', 'course title', 'title', 'course_title'])
     prerequisitos = _parse_prerequisites(_first_present(source, ['prerequisitos', 'prerequisites', 'prereq', 'required_skills', 'requirements']))
     duracion = _coerce_number(_first_present(source, ['duracion_meses', 'duration_months', 'duration', 'months', 'course_duration']), default=1)
     dificultad = _coerce_number(_first_present(source, ['dificultad', 'difficulty', 'level', 'difficulty_level', 'rating']), default=5)
