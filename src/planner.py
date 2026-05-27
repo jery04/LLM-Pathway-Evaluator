@@ -43,22 +43,56 @@ CATEGORY_KEYWORDS = [
 
 
 def load_courses(path: Optional[str] = None) -> List[Dict]:
+    cache_file = Path(__file__).resolve().parent.parent / "data" / "normalized_courses.json"
+
+    # If a cached normalized JSON exists, load and return it (single normalization run).
+    if cache_file.exists():
+        try:
+            cached = json.loads(cache_file.read_text(encoding="utf-8"))
+            if isinstance(cached, list) and any(_extract_skills(item.get('skills')) for item in cached if isinstance(item, dict)):
+                return cached
+            # A cache with no skills is usually stale, so fall through and rebuild it.
+        except Exception:
+            # If cache is corrupted, fall through to re-generate it.
+            pass
+
+    # Otherwise, load raw records from the requested path, local data, or Kaggle,
+    # normalize them once and persist the normalized JSON for future runs.
     if path:
         candidate = Path(path)
         if candidate.exists():
-            return _finalize_records(_load_records_from_path(candidate))
+            records = _load_records_from_path(candidate)
+            final = _finalize_records(records)
+            try:
+                cache_file.parent.mkdir(parents=True, exist_ok=True)
+                cache_file.write_text(json.dumps(final, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+            return final
 
     # First try to load any local data shipped with the repository (data/*.csv, json, jsonl).
     local_data_dir = Path(__file__).resolve().parent.parent / "data"
     if local_data_dir.exists():
         local_records = _load_records_from_path(local_data_dir)
         if local_records:
-            return _finalize_records(local_records)
+            final = _finalize_records(local_records)
+            try:
+                cache_file.parent.mkdir(parents=True, exist_ok=True)
+                cache_file.write_text(json.dumps(final, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+            return final
 
     # Fall back to attempting to download via kagglehub if local data isn't available.
     downloaded = _load_kaggle_dataset(KAGGLE_DATASET_ID)
+    final = _finalize_records(downloaded)
+    try:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps(final, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
-    return _finalize_records(downloaded)
+    return final
 
 
 def _load_kaggle_dataset(dataset_id: str) -> List[Dict]:
@@ -502,8 +536,30 @@ def _coerce_number(value, default: int = 0) -> int:
     return default
 
 
+def _course_richness_score(course: Dict) -> int:
+    score = len(_extract_skills(course.get('skills'))) * 4
+    score += len(_parse_prerequisites(course.get('prerequisitos'))) * 2
+
+    for field in ('nombre', 'categoria', 'tipo', 'level', 'source', 'link', 'platform'):
+        if course.get(field) not in (None, '', [], {}):
+            score += 1
+
+    return score
+
+
 def index_courses(courses: List[Dict]) -> Dict[str, Dict]:
-    return {c['nombre']: c for c in courses}
+    indexed: Dict[str, Dict] = {}
+
+    for course in courses:
+        name = course.get('nombre')
+        if not name:
+            continue
+
+        existing = indexed.get(name)
+        if existing is None or _course_richness_score(course) > _course_richness_score(existing):
+            indexed[name] = course
+
+    return indexed
 
 
 def build_required_closure(goal: str, prereq_map: Dict[str, Set[str]]) -> Set[str]:
