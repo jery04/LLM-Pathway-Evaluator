@@ -37,51 +37,70 @@ def main():
     st.set_page_config(page_title='Career Path Explorer AI')
 
     st.title('Career Path Explorer AI')
-    st.markdown('Genera y compara trayectorias profesionales alternativas.')
+    st.markdown('Generate and compare alternative career learning paths.')
 
     courses = load_data()
     course_names = [c['nombre'] for c in courses]
 
     if not course_names:
-        st.error('No se pudieron cargar cursos desde los datos locales ni desde Kaggle. Revisa la carpeta data/ y, si hace falta, el acceso a kagglehub.')
+        st.error('Could not load courses from local data or Kaggle. Check the data/ folder and Kaggle access if needed.')
         return
 
     default_skills = ['Python'] if 'Python' in course_names else [course_names[0]]
 
     with st.form('input_form'):
-        user_text = st.text_area('Describe tu objetivo y preferencias (ej: "Quiero trabajar en IA sin demasiada matemática")', height=120)
-        initial_skills = st.multiselect('Habilidades que ya tienes', options=course_names, default=default_skills)
-        weekly_time = st.number_input('Horas semanales disponibles', min_value=1, max_value=168, value=8)
-        submitted = st.form_submit_button('Generar rutas')
+        user_text = st.text_area('Describe your goal and preferences (eg: "I want to work in web design with minimal math")', height=120)
+        initial_skills = st.multiselect('Skills you already have', options=course_names, default=default_skills)
+        weekly_time = st.number_input('Weekly hours available', min_value=1, max_value=168, value=8)
+        submitted = st.form_submit_button('Generate paths')
 
     if submitted:
+        # Si el usuario no escribe nada, mostrar mensaje simple y salir.
+        if not (user_text and user_text.strip()):
+            st.info('No goal entered')
+            return
+
         parsed = parse_input(user_text or '')
-        goal = parsed.get('goal') or 'Data Scientist'
+        # Use parsed goal if available; otherwise fall back to the raw user text (better than a hardcoded role)
+        goal = parsed.get('goal') or (user_text.strip() if user_text and user_text.strip() else 'Data Scientist')
 
         avoid_math = parsed.get('preferences', {}).get('avoid_math', False)
         avoid_cats = {'Matemáticas'} if avoid_math else None
 
-        st.info('Generando rutas...')
+        st.info('Generating paths...')
         paths = generate_paths(courses, initial_skills, goal, max_paths=3, avoid_categories=avoid_cats)
 
-        st.caption(f'Objetivo detectado: {goal or "no detectado"}')
+        st.caption(f'Detected goal: {goal or "not detected"}')
         if parsed.get('skills'):
-            st.caption(f'Habilidades detectadas por el parser: {", ".join(parsed["skills"])}')
+            st.caption(f'Skills detected by parser: {", ".join(parsed["skills"])}')
 
         if not paths:
-            st.warning('No se encontraron rutas. Ajusta objetivo o habilidades iniciales.')
+            st.warning('No paths found. Adjust goal or initial skills.')
         else:
-            st.subheader('Rutas generadas')
+            st.subheader('Generated paths')
+            # Get brief explanations for each path to show below each entry
+            brief_explanations = []
+            try:
+                brief_explanations = _llm.explain_paths_brief(paths)
+            except Exception:
+                brief_explanations = []
+
             for i, p in enumerate(paths, 1):
                 target = p.get('target_course') or goal
-                st.markdown(f"**Ruta {i}**: {' → '.join(p['path'])}")
-                st.caption(f'Objetivo de referencia: {target}')
+                st.markdown(f"**Path {i}**: {' → '.join(p['path'])}")
+                # show the target course text directly in gray (no label)
+                if target:
+                    st.caption(target)
                 m = p['metrics']
-                st.write(f"Tiempo total: {m['total_months']} meses | Coste: ${m['total_cost']} | Dificultad media: {m['avg_difficulty']}")
+                st.caption(f"Total time: {m['total_months']} months | Cost: ${m['total_cost']} | Avg difficulty: {m['avg_difficulty']}")
+                # show brief multi-line explanation in gray
+                if i - 1 < len(brief_explanations):
+                    # st.caption accepts multi-line strings; they will appear in gray
+                    st.caption(brief_explanations[i - 1])
 
-            st.subheader('Comparación cualitativa (LLM)')
+            st.subheader('Qualitative comparison (LLM)')
             explanation = explain_comparison(paths, {'goal': goal, 'skills': initial_skills, 'weekly_time': weekly_time, 'objective': goal})
-            st.text_area('Explicación', value=explanation, height=240)
+            st.text_area('Explanation', value=explanation, height=240)
 
 
 if __name__ == '__main__':

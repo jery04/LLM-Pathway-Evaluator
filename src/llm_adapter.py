@@ -38,9 +38,9 @@ def parse_input(text: str) -> Dict:
     if HF_TOKEN:
         try:
             prompt = (
-                'Convierte el siguiente texto en un JSON estricto con las claves '
-                'goal, preferences y skills. preferences debe ser un objeto. '
-                f'Texto: {text}'
+                'Convert the following text into a strict JSON with keys '
+                'goal, preferences and skills. preferences must be an object. '
+                f'Text: {text}'
             )
             payload = json.dumps({'inputs': prompt}).encode('utf-8')
             request = urllib.request.Request(
@@ -103,41 +103,42 @@ def _format_paths_for_comparison(paths: List[Dict]) -> List[str]:
         route = ' -> '.join(path.get('path', []))
         target = path.get('target_course') or path.get('objective') or ''
         summaries.append(
-            f'Ruta {i}: {route}. '
-            f'Destino: {target or "no especificado"}. '
-            f'Tiempo: {metrics.get("total_months", "?")} meses. '
-            f'Coste: {metrics.get("total_cost", "?")}. '
-            f'Dificultad media: {metrics.get("avg_difficulty", "?")}. '
-            f'Pasos: {metrics.get("steps", "?")}'
+            f'Path {i}: {route}. '
+            f'Destination: {target or "unspecified"}. '
+            f'Time: {metrics.get("total_months", "?")} months. '
+            f'Cost: {metrics.get("total_cost", "?")}. '
+            f'Avg difficulty: {metrics.get("avg_difficulty", "?")}. '
+            f'Steps: {metrics.get("steps", "?")}'
         )
     return summaries
 
 
 def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
-    # If OpenAI available, ask for qualitative comparison
+    # Prefer LLMs if available to produce explanations in the requested format (English).
+    prompt_header = (
+        'Format the output in English. For each path, show on one line the sequence of courses separated by " -> " and below write a clear explanation of how that path enables reaching the goal. '
+        'At the end of all paths, provide an extended and well-argued conclusion indicating which path you recommend and why. '
+        'Use a professional, pedagogical tone. Plain text output.'
+    )
+
+    summary_lines = []
+    for i, p in enumerate(paths, 1):
+        route = ' -> '.join(p.get('path', []))
+        metrics = p.get('metrics', {})
+        summary_lines.append(f'Ruta {i}: {route}. Tiempo: {metrics.get("total_months", "?")} meses; Coste: ${metrics.get("total_cost", "?")}; Dificultad media: {metrics.get("avg_difficulty", "?")}')
+
+    prompt_body = '\n'.join(summary_lines) + '\nUser profile: ' + str(user_profile)
+
     if openai:
         try:
-            prompt = (
-                'Compara estas trayectorias profesionales para un sistema de exploración de trayectorias alternativas. '\
-                'Evalúa rapidez, esfuerzo, coste, solidez técnica y ajuste al objetivo del usuario. '\
-                'Al final, incluye una conclusión cerrada con estas dos líneas exactas:\n'
-                'Criterio de comparación final: <el criterio principal que mejor separa las rutas>\n'
-                'Ruta recomendada: <ruta ganadora o empate razonado>\n\n'
-                + '\n'.join(_format_paths_for_comparison(paths))
-                + '\nPerfil del usuario: '
-                + str(user_profile)
-            )
             resp = openai.ChatCompletion.create(
                 model='gpt-4o-mini',
                 messages=[
-                    {
-                        'role': 'system',
-                        'content': 'Eres un evaluador académico y debes cerrar siempre con un criterio de comparación final y una ruta recomendada.'
-                    },
-                    {'role': 'user', 'content': prompt}
+                    {'role': 'system', 'content': 'You are an academic advisor who lists learning paths and argues a final recommendation in English.'},
+                    {'role': 'user', 'content': prompt_header + '\n\n' + prompt_body}
                 ],
                 temperature=0.7,
-                max_tokens=450
+                max_tokens=900
             )
             return resp['choices'][0]['message']['content']
         except Exception:
@@ -145,17 +146,7 @@ def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
 
     if HF_TOKEN:
         try:
-            summary = _format_paths_for_comparison(paths)
-            prompt = (
-                'Compara estas trayectorias profesionales de forma clara, breve y útil para un trabajo académico. '
-                'Debes terminar con una línea de criterio final y otra de ruta recomendada. '\
-                'Usa exactamente estos cierres:\n'
-                'Criterio de comparación final: <criterio principal>\n'
-                'Ruta recomendada: <ruta o empate razonado>\n\n'
-                + '\n'.join(summary)
-                + f'\nPerfil del usuario: {user_profile}'
-            )
-            payload = json.dumps({'inputs': prompt}).encode('utf-8')
+            payload = json.dumps({'inputs': prompt_header + '\n\n' + prompt_body}).encode('utf-8')
             request = urllib.request.Request(
                 f'https://api-inference.huggingface.co/models/{HF_MODEL}',
                 data=payload,
@@ -165,7 +156,7 @@ def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
                 },
                 method='POST'
             )
-            with urllib.request.urlopen(request, timeout=45) as response:
+            with urllib.request.urlopen(request, timeout=60) as response:
                 raw = response.read().decode('utf-8')
             data = json.loads(raw)
             if isinstance(data, list) and data:
@@ -173,28 +164,115 @@ def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
             else:
                 generated = data.get('generated_text', '') if isinstance(data, dict) else ''
             if generated:
-                if 'Criterio de comparación final:' not in generated:
-                    generated = (
-                        generated.rstrip()
-                        + '\n\nCriterio de comparación final: rapidez, coste y ajuste al objetivo del usuario.'
-                        + '\nRuta recomendada: la ruta con mejor equilibrio entre tiempo y profundidad técnica.'
-                    )
                 return generated
         except Exception:
             pass
 
-    # Simple fallback explanation
-    lines = []
+    # Fallback heuristic: generate explanations and a long recommendation in English.
+    def _route_explanation(route_idx: int, p: Dict) -> str:
+        path = p.get('path', [])
+        metrics = p.get('metrics', {})
+        if not path:
+            return f'Path {route_idx}: (empty)\nNo courses available.'
+
+        explanation = []
+        explanation.append(f"{' -> '.join(path)}")
+        # Describe progression: foundations, intermediate, then target.
+        if len(path) == 1:
+            explanation.append(f"This path consists of a single course that acts as a gateway toward the goal. With an estimated duration of {metrics.get('total_months', '?')} months, it enables acquisition of the essential competencies directly.")
+        else:
+            first = path[0]
+            last = path[-1]
+            middle = path[1:-1]
+            explanation.append(f"It starts with '{first}', which provides the necessary foundations. It then continues with {', '.join([f"'{m}'" for m in middle])} to consolidate intermediate and practical skills, and finally '{last}' focuses on the final objective.")
+            explanation.append(f"Approximate total time: {metrics.get('total_months', '?')} months; estimated cost: ${metrics.get('total_cost', '?')}; average difficulty: {metrics.get('avg_difficulty', '?')}.")
+            explanation.append("This sequence respects dependencies: each step builds on the previous one to reduce failures and accelerate practical assimilation.")
+
+        return '\n'.join(explanation)
+
+    parts = []
     for i, p in enumerate(paths, 1):
+        parts.append(_route_explanation(i, p))
+
+    # Recommendation heuristics
+    def _score(p: Dict) -> float:
         m = p.get('metrics', {})
-        lines.append(
-            f"Ruta {i}: {', '.join(p.get('path', []))}\n"
-            f" - Tiempo: {m.get('total_months')} meses, Coste aprox: ${m.get('total_cost')}, Dificultad media: {m.get('avg_difficulty')}"
-        )
-    lines.append(
-        '\nCriterio de comparación final: equilibrio entre rapidez de llegada al objetivo, coste total y solidez técnica.'
-    )
-    lines.append(
-        'Ruta recomendada: la alternativa que minimiza tiempo sin sacrificar demasiado la profundidad técnica.'
-    )
-    return '\n\n'.join(lines)
+        months = m.get('total_months') or 1
+        cost = m.get('total_cost') or 0
+        diff = m.get('avg_difficulty') or 1
+        steps = m.get('steps') or max(1, len(p.get('path', [])))
+        # Prefer lower months, moderate difficulty, fewer steps, lower cost
+        return (1.0 / months) * 0.45 + (1.0 / (1 + diff)) * 0.25 + (1.0 / (1 + steps)) * 0.15 + (1.0 / (1 + cost)) * 0.15
+
+    best_idx = max(range(len(paths)), key=lambda i: _score(paths[i])) if paths else None
+
+    # Long, argued recommendation
+    recommendation = []
+    recommendation.append('Final conclusion and recommendation:')
+    if best_idx is None:
+        recommendation.append('It was not possible to determine a recommended path due to insufficient data.')
+    else:
+        chosen = paths[best_idx]
+        rec_route = ' -> '.join(chosen.get('path', []))
+        recommendation.append(f'I recommend taking Path {best_idx + 1}: {rec_route}.')
+        recommendation.append('Detailed argument:')
+        # Provide an extended argument comparing metrics
+        for i, p in enumerate(paths, 1):
+            m = p.get('metrics', {})
+            recommendation.append(
+                f'- Path {i}: time {m.get("total_months", "?")} months, cost ${m.get("total_cost", "?")}, avg difficulty {m.get("avg_difficulty", "?")}, steps {m.get("steps", "?")}'
+            )
+
+        recommendation.append('I weighed the key factors:')
+        recommendation.append('- Speed to reach the goal (I favor paths with lower total time).')
+        recommendation.append('- Cognitive load and drop-out risk (I favor moderate difficulty).')
+        recommendation.append('- Cost and economic accessibility.')
+        recommendation.append('- Technical robustness: I prefer paths that include fundamentals before advanced courses.')
+
+        recommendation.append('In balance, the recommended path offers the best compromise between arriving at the goal quickly without sacrificing the technical depth required to perform competently. If your main priority is minimizing time at all costs, choose a shorter path; if instead you seek maximum technical robustness, choose the longer, deeper path. This recommendation assumes the weekly time reported in the profile and a desire for a balance between speed and robustness.')
+
+        recommendation.append('Practical suggestions:')
+        recommendation.append('- Keep a weekly study plan with concrete goals per course.')
+        recommendation.append('- Do small projects after each intermediate course to consolidate learning.')
+        recommendation.append('- Review and adjust the path as you progress and as market requirements evolve.')
+
+    return '\n\n'.join(parts + ['\n'.join(recommendation)])
+
+
+def explain_paths_brief(paths: List[Dict]) -> List[str]:
+    """Return a short, one-paragraph explanation for each path (English).
+
+    This is used by the UI to show a concise caption under each path.
+    """
+    brief = []
+
+    for p in paths:
+        path = p.get('path', [])
+        m = p.get('metrics', {})
+        months = m.get('total_months', '?')
+        cost = m.get('total_cost', '?')
+        difficulty = m.get('avg_difficulty', '?')
+
+        if not path:
+            brief.append('No courses available for this path.')
+            continue
+
+        # Compose a short 3-line paragraph describing progression, skills gained, and practical advice.
+        if len(path) == 1:
+            line1 = f"Single course '{path[0]}' serves as a focused entry point to the topic."
+            line2 = f"This course introduces the essential concepts and practical skills needed to start working in the area."
+            line3 = f"Estimated time: {months} months; cost: ${cost}; average difficulty: {difficulty}."
+            s = '\n'.join([line1, line2, line3])
+        else:
+            first = path[0]
+            last = path[-1]
+            middle = path[1:-1]
+            line1 = f"Starts with '{first}' to build foundations, then {' then '.join([m for m in middle]) if middle else 'continues'} and finishes with '{last}'."
+            line2 = f"This sequence builds practical skills step-by-step: foundations → intermediate practice → applied project or specialization."
+            line3 = f"Estimated time: {months} months; cost: ${cost}; average difficulty: {difficulty}."
+            line4 = "Recommend doing small projects after each intermediate course to consolidate learning."
+            s = '\n'.join([line1, line2, line3, line4])
+
+        brief.append(s)
+
+    return brief
