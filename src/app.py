@@ -73,12 +73,14 @@ def main():
         else:
             st.subheader('Rutas generadas')
             for i, p in enumerate(paths, 1):
+                target = p.get('target_course') or goal
                 st.markdown(f"**Ruta {i}**: {' → '.join(p['path'])}")
+                st.caption(f'Objetivo de referencia: {target}')
                 m = p['metrics']
                 st.write(f"Tiempo total: {m['total_months']} meses | Coste: ${m['total_cost']} | Dificultad media: {m['avg_difficulty']}")
 
             st.subheader('Comparación cualitativa (LLM)')
-            explanation = explain_comparison(paths, {'goal': goal, 'skills': initial_skills, 'weekly_time': weekly_time})
+            explanation = explain_comparison(paths, {'goal': goal, 'skills': initial_skills, 'weekly_time': weekly_time, 'objective': goal})
             st.text_area('Explicación', value=explanation, height=240)
 
 

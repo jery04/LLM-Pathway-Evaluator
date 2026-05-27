@@ -1,12 +1,45 @@
 import csv
 import heapq
 import json
+import re
 from pathlib import Path
 from typing import List, Dict, Set, Tuple, Optional
 
 
 KAGGLE_DATASET_ID = "everydaycodings/multi-platform-online-courses-dataset"
 KAGGLE_DOWNLOAD_DIR = Path(__file__).resolve().parent.parent / "data" / "kagglehub"
+
+ROLE_KEYWORDS = {
+    'AI Engineer': ['machine learning', 'deep learning', 'artificial intelligence', 'generative ai', 'python', 'statistics'],
+    'Data Scientist': ['data science', 'machine learning', 'statistics', 'python', 'sql', 'data analysis'],
+    'Cloud Engineer': ['cloud', 'devops', 'docker', 'kubernetes', 'linux', 'aws'],
+    'Backend Engineer': ['backend', 'api', 'database', 'sql', 'python', 'javascript', 'node'],
+    'Cybersecurity Analyst': ['cybersecurity', 'security', 'network', 'linux', 'cryptography'],
+}
+
+LEVEL_RANKS = {
+    'beginner': 1,
+    'introductory': 1,
+    'fundamental': 1,
+    'fundamentals': 1,
+    'basic': 1,
+    'intermediate': 2,
+    'upper intermediate': 2,
+    'advanced': 3,
+    'expert': 4,
+    'all levels': 2,
+}
+
+CATEGORY_KEYWORDS = [
+    ('IA', ['machine learning', 'deep learning', 'artificial intelligence', 'generative ai', 'nlp']),
+    ('Datos', ['data science', 'data analysis', 'analytics', 'sql', 'statistics', 'excel']),
+    ('Cloud', ['cloud', 'aws', 'gcp', 'azure', 'devops', 'docker', 'kubernetes', 'linux']),
+    ('Web', ['web', 'javascript', 'react', 'frontend', 'backend', 'html', 'css', 'node']),
+    ('Matemáticas', ['math', 'mathematics', 'statistics', 'linear algebra', 'calculus', 'probability']),
+    ('Seguridad', ['cybersecurity', 'security', 'cryptography', 'network']),
+    ('Diseño', ['design', 'ux', 'ui', 'graphic', 'illustration', 'procreate', 'photoshop']),
+    ('Management', ['project management', 'product management', 'leadership', 'strategy', 'planning']),
+]
 
 
 def load_courses(path: Optional[str] = None) -> List[Dict]:
@@ -74,6 +107,223 @@ def _load_records_from_file(path: Path) -> List[Dict]:
     return []
 
 
+def _normalize_text(value) -> str:
+    return str(value).strip().lower() if value not in (None, '') else ''
+
+
+def _extract_skills(value) -> List[str]:
+    if value in (None, '', [], {}):
+        return []
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, tuple):
+        items = list(value)
+    else:
+        text = str(value)
+        text = text.replace('{', '').replace('}', '').replace('"', '')
+        items = re.split(r'[,;|/]', text)
+    cleaned = []
+    for item in items:
+        token = str(item).strip()
+        token = token.lstrip('-').strip()
+        if token:
+            cleaned.append(token)
+    return cleaned
+
+
+def _level_to_rank(level) -> int:
+    text = _normalize_text(level)
+    for key, value in LEVEL_RANKS.items():
+        if key in text:
+            return value
+    return 2 if text else 1
+
+
+def _level_to_difficulty(level) -> int:
+    rank = _level_to_rank(level)
+    return min(10, max(1, rank * 3))
+
+
+def _parse_duration_to_months(value) -> int:
+    if value in (None, '', [], {}):
+        return 1
+    if isinstance(value, (int, float)):
+        return max(1, int(round(float(value))))
+
+    text = _normalize_text(value)
+    if not text:
+        return 1
+
+    months_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:-|to)?\s*(\d+(?:\.\d+)?)?\s*(months?|meses?)', text)
+    if months_match:
+        start = float(months_match.group(1))
+        end = float(months_match.group(2)) if months_match.group(2) else start
+        return max(1, int(round((start + end) / 2)))
+
+    weeks_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:-|to)?\s*(\d+(?:\.\d+)?)?\s*(weeks?|semanas?)', text)
+    if weeks_match:
+        start = float(weeks_match.group(1))
+        end = float(weeks_match.group(2)) if weeks_match.group(2) else start
+        weeks = (start + end) / 2
+        return max(1, int(round(weeks / 4.0)))
+
+    hours_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:-|to)?\s*(\d+(?:\.\d+)?)?\s*(hours?|hrs?|h)', text)
+    if hours_match:
+        start = float(hours_match.group(1))
+        end = float(hours_match.group(2)) if hours_match.group(2) else start
+        hours = (start + end) / 2
+        return max(1, int(round(hours / 20.0)))
+
+    digits = ''.join(ch for ch in text if ch.isdigit() or ch == '.')
+    if digits:
+        try:
+            return max(1, int(round(float(digits))))
+        except ValueError:
+            pass
+    return 1
+
+
+def _infer_category_from_text(text: str) -> str:
+    lowered = text.lower()
+    for category, keywords in CATEGORY_KEYWORDS:
+        if any(keyword in lowered for keyword in keywords):
+            return category
+    return 'General'
+
+
+def _course_search_blob(course: Dict) -> str:
+    parts = [
+        course.get('nombre', ''),
+        course.get('categoria', ''),
+        course.get('tipo', ''),
+        course.get('source', ''),
+        ' '.join(course.get('skills', [])) if isinstance(course.get('skills'), list) else course.get('skills', ''),
+    ]
+    return ' '.join(str(part) for part in parts if part).lower()
+
+
+def _infer_category(record: Dict, fallback: str = 'General') -> str:
+    for field in ('categoria', 'subject', 'category', 'institution', 'partner', 'topic', 'domain'):
+        candidate = record.get(field)
+        if candidate not in (None, ''):
+            inferred = _infer_category_from_text(str(candidate))
+            if inferred != 'General':
+                return inferred
+
+    title = record.get('nombre', '')
+    skills = ' '.join(record.get('skills', [])) if isinstance(record.get('skills'), list) else ''
+    inferred = _infer_category_from_text(f'{title} {skills}')
+    return inferred if inferred != 'General' else fallback
+
+
+def _score_goal_match(course: Dict, goal_text: str, goal_keywords: Set[str]) -> float:
+    blob = _course_search_blob(course)
+    score = 0.0
+    title = _normalize_text(course.get('nombre', ''))
+
+    if goal_text and goal_text in title:
+        score += 8.0
+    if goal_text and goal_text in blob:
+        score += 6.0
+
+    for keyword in goal_keywords:
+        if keyword and keyword in blob:
+            score += 1.0
+        elif keyword and keyword in title:
+            score += 1.5
+
+    # Encourage courses that look like foundations for a role.
+    if any(term in blob for term in ('introduction', 'fundamentals', 'bootcamp', 'basics', 'learn')):
+        score += 0.4
+
+    return score
+
+
+def _resolve_goal_targets(idx: Dict[str, Dict], goal: str, top_k: int = 4) -> List[str]:
+    goal_text = _normalize_text(goal)
+    if not goal_text:
+        return []
+
+    exact_match = next((name for name in idx if _normalize_text(name) == goal_text), None)
+    if exact_match:
+        return [exact_match]
+
+    keywords = set(re.findall(r'[a-z0-9áéíóúñ+#]+', goal_text))
+    keywords.update(ROLE_KEYWORDS.get(goal, []))
+    if goal_text in ROLE_KEYWORDS:
+        keywords.update(ROLE_KEYWORDS[goal_text])
+
+    scored = []
+    for name, course in idx.items():
+        score = _score_goal_match(course, goal_text, keywords)
+        if score > 0:
+            scored.append((score, name))
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [name for _, name in scored[:top_k]]
+
+
+def _infer_prereq_candidates(record: Dict, all_records: List[Dict], idx: Dict[str, Dict]) -> List[str]:
+    title_blob = _course_search_blob(record)
+    current_rank = _level_to_rank(record.get('level') or record.get('tipo') or record.get('dificultad'))
+
+    if current_rank <= 1 or any(marker in title_blob for marker in ('introduction', 'fundamentals', 'basics', 'bootcamp', 'for everyone', 'beginner', 'getting started')):
+        return []
+
+    topic_rules = [
+        (['ai engineering', 'ai engineer', 'mlops'], ['python', 'statistics', 'data science', 'machine learning']),
+        (['machine learning', 'deep learning', 'artificial intelligence', 'generative ai', 'nlp'], ['python', 'statistics', 'data science']),
+        (['data science', 'data analysis', 'analytics', 'business intelligence'], ['python', 'sql', 'statistics', 'excel']),
+        (['web development', 'frontend', 'react', 'javascript', 'html', 'css'], ['javascript', 'programming', 'web']),
+        (['backend', 'api', 'server'], ['programming', 'sql', 'database', 'python']),
+        (['cloud', 'devops', 'kubernetes', 'docker', 'aws', 'azure'], ['linux', 'programming', 'cloud']),
+        (['cybersecurity', 'security', 'cryptography', 'network'], ['network', 'linux', 'programming']),
+        (['project management', 'product management', 'leadership'], ['communication', 'planning', 'management']),
+        (['design', 'ux', 'ui', 'graphic', 'illustration'], ['design', 'creativity', 'tools']),
+        (['python'], ['programming']),
+        (['sql'], ['database', 'data']),
+    ]
+
+    wanted_terms: List[str] = []
+    for trigger_terms, prereq_terms in topic_rules:
+        if any(term in title_blob for term in trigger_terms):
+            wanted_terms.extend(prereq_terms)
+
+    if not wanted_terms:
+        wanted_terms.extend(['introduction', 'fundamentals', 'basics'])
+
+    scored_candidates: List[Tuple[float, str]] = []
+    for candidate_name, candidate in idx.items():
+        if candidate_name == record.get('nombre'):
+            continue
+
+        candidate_blob = _course_search_blob(candidate)
+        candidate_rank = _level_to_rank(candidate.get('level') or candidate.get('tipo') or candidate.get('dificultad'))
+        score = 0.0
+
+        if candidate_rank <= current_rank:
+            score += 1.0
+        if candidate.get('categoria') == record.get('categoria'):
+            score += 0.75
+        wanted_match = any(term in candidate_blob for term in wanted_terms)
+        foundation_match = any(term in candidate_blob for term in ('introduction', 'fundamentals', 'basics', 'bootcamp', 'learn'))
+        if wanted_match:
+            score += 2.5
+        if foundation_match:
+            score += 0.5
+        if candidate.get('duracion_meses', 0) <= max(1, record.get('duracion_meses', 1)):
+            score += 0.25
+
+        if wanted_terms and not wanted_match and not foundation_match:
+            continue
+
+        if score > 0:
+            scored_candidates.append((score, candidate_name))
+
+    scored_candidates.sort(key=lambda item: (-item[0], idx[item[1]].get('duracion_meses', 0), item[1]))
+    return [name for _, name in scored_candidates[:2]]
+
+
 def _finalize_records(records: List[Dict]) -> List[Dict]:
     normalized = []
     for record in records:
@@ -111,47 +361,22 @@ def _infer_missing_prerequisites(records: List[Dict], idx: Dict[str, Dict]) -> D
     for record in records:
         if record.get('prerequisitos'):
             continue
-        prereqs = _infer_prereqs_for_record(record, by_category)
+        prereqs = _infer_prereqs_for_record(record, records, idx, by_category)
         if prereqs:
             inferred[record['nombre']] = prereqs
 
     return inferred
 
 
-def _infer_prereqs_for_record(record: Dict, by_category: Dict[str, List[Dict]]) -> List[str]:
-    name = (record.get('nombre') or '').lower()
+def _infer_prereqs_for_record(record: Dict, records: List[Dict], idx: Dict[str, Dict], by_category: Dict[str, List[Dict]]) -> List[str]:
+    del by_category
+    prereqs = _infer_prereq_candidates(record, records, idx)
+    if prereqs:
+        return prereqs
+
     category = record.get('categoria') or 'General'
     difficulty = record.get('dificultad', 0)
-
-    keyword_rules = [
-        (['python'], []),
-        (['sql'], ['Python']),
-        (['data analysis', 'data analytics', 'analytics'], ['Python', 'SQL']),
-        (['statistics', 'statistical'], ['Python']),
-        (['linear algebra'], []),
-        (['calculus'], []),
-        (['data structures'], ['Python']),
-        (['algorithms'], ['Data Structures']),
-        (['machine learning', 'ml '], ['Python', 'Statistics']),
-        (['deep learning'], ['Machine Learning', 'Linear Algebra']),
-        (['nlp', 'natural language'], ['Machine Learning']),
-        (['mlops'], ['Machine Learning', 'Docker']),
-        (['docker'], ['Python']),
-        (['kubernetes'], ['Docker']),
-        (['cloud fundamentals', 'cloud'], []),
-        (['aws'], ['Cloud Fundamentals']),
-        (['devops'], ['Docker']),
-        (['backend'], ['Python']),
-        (['api'], ['Backend Development']),
-        (['cybersecurity'], []),
-        (['networking'], []),
-    ]
-
-    for tokens, prereqs in keyword_rules:
-        if any(token in name for token in tokens):
-            return prereqs[:]
-
-    same_category = [item for item in by_category.get(category, []) if item.get('nombre') != record.get('nombre')]
+    same_category = [item for item in records if item.get('categoria') == category and item.get('nombre') != record.get('nombre')]
     lower_difficulty = [item for item in same_category if item.get('dificultad', 0) < difficulty]
     if lower_difficulty:
         lower_difficulty.sort(key=lambda item: (
@@ -164,29 +389,71 @@ def _infer_prereqs_for_record(record: Dict, by_category: Dict[str, List[Dict]]) 
     return []
 
 
+def _build_goal_prereq_map(goal: str, idx: Dict[str, Dict], max_depth: int = 3) -> Dict[str, Set[str]]:
+    subgraph: Dict[str, Set[str]] = {}
+    visited: Set[str] = set()
+
+    def visit(course_name: str, depth: int = 0) -> None:
+        if course_name in visited or depth > max_depth:
+            return
+        visited.add(course_name)
+
+        course = idx.get(course_name)
+        if not course:
+            return
+
+        prereqs = set(course.get('prerequisitos', []))
+        if not prereqs:
+            prereqs = set(_infer_prereq_candidates(course, list(idx.values()), idx))
+
+        subgraph[course_name] = prereqs
+        for prereq in prereqs:
+            if prereq in idx:
+                visit(prereq, depth + 1)
+
+    visit(goal)
+    return subgraph
+
+
 def _normalize_record(record: Dict) -> Dict:
     source = {str(key).strip().lower(): value for key, value in dict(record).items()}
 
     # Accept a wider set of possible field names coming from different CSVs
     nombre = _first_present(source, ['nombre', 'name', 'course', 'course_name', 'course title', 'course title', 'title', 'course_title'])
     prerequisitos = _parse_prerequisites(_first_present(source, ['prerequisitos', 'prerequisites', 'prereq', 'required_skills', 'requirements']))
-    duracion = _coerce_number(_first_present(source, ['duracion_meses', 'duration_months', 'duration', 'months', 'course_duration']), default=1)
-    dificultad = _coerce_number(_first_present(source, ['dificultad', 'difficulty', 'level', 'difficulty_level', 'rating']), default=5)
+    duracion = _parse_duration_to_months(_first_present(source, ['duracion_meses', 'duration_months', 'duration', 'months', 'course_duration']))
+    raw_level = _first_present(source, ['nivel', 'level', 'difficulty_level'])
+    dificultad = _coerce_number(_first_present(source, ['dificultad', 'difficulty', 'rating']), default=_level_to_difficulty(raw_level))
     categoria = _first_present(source, ['categoria', 'category', 'subject', 'topic', 'domain']) or 'General'
     tipo = _first_present(source, ['tipo', 'type', 'course_type']) or 'curso'
     coste = _coerce_number(_first_present(source, ['coste_usd', 'cost', 'price', 'fee', 'course_fee']), default=0)
+    skills = _extract_skills(_first_present(source, ['skills', 'associatedskills', 'skill', 'tags', 'topics']))
+    source_label = _first_present(source, ['partner', 'institution', 'source', 'provider', 'instructor']) or ''
 
     if isinstance(nombre, str):
         nombre = nombre.strip()
+
+    enriched_category = _infer_category({
+        'nombre': nombre or '',
+        'categoria': categoria,
+        'subject': _first_present(source, ['subject']),
+        'category': _first_present(source, ['category']),
+        'institution': _first_present(source, ['institution']),
+        'partner': _first_present(source, ['partner']),
+        'skills': skills,
+    }, fallback=categoria or 'General')
 
     return {
         'nombre': nombre,
         'prerequisitos': prerequisitos,
         'duracion_meses': int(duracion),
         'dificultad': int(dificultad),
-        'categoria': categoria,
+        'categoria': enriched_category,
         'tipo': tipo,
         'coste_USD': int(coste),
+        'level': raw_level or '',
+        'skills': skills,
+        'source': source_label,
     }
 
 
@@ -201,12 +468,12 @@ def _parse_prerequisites(value) -> List[str]:
     if value in (None, '', [], {}):
         return []
     if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
+        return [str(item).strip() for item in value if str(item).strip() and str(item).strip().lower() not in {'none', 'none.', 'null', 'nan'}]
     if isinstance(value, tuple):
-        return [str(item).strip() for item in value if str(item).strip()]
+        return [str(item).strip() for item in value if str(item).strip() and str(item).strip().lower() not in {'none', 'none.', 'null', 'nan'}]
     if isinstance(value, str):
         parts = [part.strip() for part in value.replace(';', ',').split(',')]
-        return [part for part in parts if part]
+        return [part for part in parts if part and part.lower() not in {'none', 'none.', 'null', 'nan'}]
     return [str(value).strip()]
 
 
@@ -253,9 +520,12 @@ def generate_paths(courses: List[Dict], initial_skills: List[str], goal: str,
                    max_paths: int = 3, max_depth: int = 12,
                    avoid_categories: Set[str] = None) -> List[Dict]:
     idx = index_courses(courses)
-    prereq_map = {name: set(c.get('prerequisitos', [])) for name, c in idx.items()}
     category = {name: c.get('categoria') for name, c in idx.items()}
-    required_for_goal = build_required_closure(goal, prereq_map)
+    goal_targets = _resolve_goal_targets(idx, goal)
+    if not goal_targets and goal in idx:
+        goal_targets = [goal]
+    if not goal_targets:
+        return []
 
     profiles = [
         {
@@ -295,26 +565,34 @@ def generate_paths(courses: List[Dict], initial_skills: List[str], goal: str,
         if len(results) >= max_paths:
             break
 
-        solution = search_best_path(
-            idx=idx,
-            prereq_map=prereq_map,
-            category=category,
-            initial_skills=initial_skills,
-            goal=goal,
-            required_for_goal=required_for_goal,
-            avoid_categories=avoid_categories,
-            max_depth=max_depth,
-            profile=profile,
-        )
+        for target in goal_targets:
+            if len(results) >= max_paths:
+                break
 
-        if not solution:
-            continue
+            target_prereq_map = _build_goal_prereq_map(target, idx)
+            required_for_goal = build_required_closure(target, target_prereq_map) | {target}
+            solution = search_best_path(
+                idx=idx,
+                prereq_map=target_prereq_map,
+                category=category,
+                initial_skills=initial_skills,
+                goal=target,
+                required_for_goal=required_for_goal,
+                avoid_categories=avoid_categories,
+                max_depth=max_depth,
+                profile=profile,
+            )
 
-        signature = tuple(solution['path'])
-        if signature in seen_signatures:
-            continue
-        seen_signatures.add(signature)
-        results.append(solution)
+            if not solution:
+                continue
+
+            signature = tuple(solution['path'])
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+            solution['objective'] = goal
+            solution['target_course'] = target
+            results.append(solution)
 
     # If some profiles collapsed to the same solution, try a few more greedy variations.
     if len(results) < max_paths:
@@ -337,24 +615,31 @@ def generate_paths(courses: List[Dict], initial_skills: List[str], goal: str,
         for profile in backup_profiles:
             if len(results) >= max_paths:
                 break
-            solution = search_best_path(
-                idx=idx,
-                prereq_map=prereq_map,
-                category=category,
-                initial_skills=initial_skills,
-                goal=goal,
-                required_for_goal=required_for_goal,
-                avoid_categories=avoid_categories,
-                max_depth=max_depth,
-                profile=profile,
-            )
-            if not solution:
-                continue
-            signature = tuple(solution['path'])
-            if signature in seen_signatures:
-                continue
-            seen_signatures.add(signature)
-            results.append(solution)
+            for target in goal_targets:
+                if len(results) >= max_paths:
+                    break
+                target_prereq_map = _build_goal_prereq_map(target, idx)
+                required_for_goal = build_required_closure(target, target_prereq_map) | {target}
+                solution = search_best_path(
+                    idx=idx,
+                    prereq_map=target_prereq_map,
+                    category=category,
+                    initial_skills=initial_skills,
+                    goal=target,
+                    required_for_goal=required_for_goal,
+                    avoid_categories=avoid_categories,
+                    max_depth=max_depth,
+                    profile=profile,
+                )
+                if not solution:
+                    continue
+                signature = tuple(solution['path'])
+                if signature in seen_signatures:
+                    continue
+                seen_signatures.add(signature)
+                solution['objective'] = goal
+                solution['target_course'] = target
+                results.append(solution)
 
     return results
 

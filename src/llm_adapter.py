@@ -96,17 +96,48 @@ def parse_input(text: str) -> Dict:
     }
 
 
+def _format_paths_for_comparison(paths: List[Dict]) -> List[str]:
+    summaries = []
+    for i, path in enumerate(paths, 1):
+        metrics = path.get('metrics', {})
+        route = ' -> '.join(path.get('path', []))
+        target = path.get('target_course') or path.get('objective') or ''
+        summaries.append(
+            f'Ruta {i}: {route}. '
+            f'Destino: {target or "no especificado"}. '
+            f'Tiempo: {metrics.get("total_months", "?")} meses. '
+            f'Coste: {metrics.get("total_cost", "?")}. '
+            f'Dificultad media: {metrics.get("avg_difficulty", "?")}. '
+            f'Pasos: {metrics.get("steps", "?")}'
+        )
+    return summaries
+
+
 def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
     # If OpenAI available, ask for qualitative comparison
     if openai:
         try:
-            prompt = 'Compare these career paths and explain advantages and trade-offs for a user: '\
-                     + str(paths) + '\nUser: ' + str(user_profile)
+            prompt = (
+                'Compara estas trayectorias profesionales para un sistema de exploración de trayectorias alternativas. '\
+                'Evalúa rapidez, esfuerzo, coste, solidez técnica y ajuste al objetivo del usuario. '\
+                'Al final, incluye una conclusión cerrada con estas dos líneas exactas:\n'
+                'Criterio de comparación final: <el criterio principal que mejor separa las rutas>\n'
+                'Ruta recomendada: <ruta ganadora o empate razonado>\n\n'
+                + '\n'.join(_format_paths_for_comparison(paths))
+                + '\nPerfil del usuario: '
+                + str(user_profile)
+            )
             resp = openai.ChatCompletion.create(
                 model='gpt-4o-mini',
-                messages=[{'role': 'user', 'content': prompt}],
+                messages=[
+                    {
+                        'role': 'system',
+                        'content': 'Eres un evaluador académico y debes cerrar siempre con un criterio de comparación final y una ruta recomendada.'
+                    },
+                    {'role': 'user', 'content': prompt}
+                ],
                 temperature=0.7,
-                max_tokens=400
+                max_tokens=450
             )
             return resp['choices'][0]['message']['content']
         except Exception:
@@ -114,17 +145,13 @@ def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
 
     if HF_TOKEN:
         try:
-            summary = []
-            for i, p in enumerate(paths, 1):
-                m = p.get('metrics', {})
-                summary.append(
-                    f'Ruta {i}: {" -> ".join(p.get("path", []))}. '
-                    f'Tiempo {m.get("total_months")} meses, coste {m.get("total_cost")}, '
-                    f'dificultad media {m.get("avg_difficulty")}'
-                )
+            summary = _format_paths_for_comparison(paths)
             prompt = (
-                'Compara estas trayectorias profesionales de forma clara, breve y útil. '
-                'Destaca rapidez, esfuerzo y conveniencia para el usuario.\n'
+                'Compara estas trayectorias profesionales de forma clara, breve y útil para un trabajo académico. '
+                'Debes terminar con una línea de criterio final y otra de ruta recomendada. '\
+                'Usa exactamente estos cierres:\n'
+                'Criterio de comparación final: <criterio principal>\n'
+                'Ruta recomendada: <ruta o empate razonado>\n\n'
                 + '\n'.join(summary)
                 + f'\nPerfil del usuario: {user_profile}'
             )
@@ -146,6 +173,12 @@ def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
             else:
                 generated = data.get('generated_text', '') if isinstance(data, dict) else ''
             if generated:
+                if 'Criterio de comparación final:' not in generated:
+                    generated = (
+                        generated.rstrip()
+                        + '\n\nCriterio de comparación final: rapidez, coste y ajuste al objetivo del usuario.'
+                        + '\nRuta recomendada: la ruta con mejor equilibrio entre tiempo y profundidad técnica.'
+                    )
                 return generated
         except Exception:
             pass
@@ -154,6 +187,14 @@ def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
     lines = []
     for i, p in enumerate(paths, 1):
         m = p.get('metrics', {})
-        lines.append(f"Ruta {i}: {', '.join(p.get('path', []))}\n - Tiempo: {m.get('total_months')} meses, Coste aprox: ${m.get('total_cost')}, Dificultad media: {m.get('avg_difficulty')}")
-    lines.append('\nSugerencia: elige la ruta con menor tiempo si buscas inserción rápida; elige mayor dificultad si buscas profundidad técnica.')
+        lines.append(
+            f"Ruta {i}: {', '.join(p.get('path', []))}\n"
+            f" - Tiempo: {m.get('total_months')} meses, Coste aprox: ${m.get('total_cost')}, Dificultad media: {m.get('avg_difficulty')}"
+        )
+    lines.append(
+        '\nCriterio de comparación final: equilibrio entre rapidez de llegada al objetivo, coste total y solidez técnica.'
+    )
+    lines.append(
+        'Ruta recomendada: la alternativa que minimiza tiempo sin sacrificar demasiado la profundidad técnica.'
+    )
     return '\n\n'.join(lines)
