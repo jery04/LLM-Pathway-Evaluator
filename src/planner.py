@@ -77,33 +77,33 @@ def _load_kaggle_dataset(dataset_id: str) -> List[Dict]:
 
 def _load_records_from_path(path: Path) -> List[Dict]:
     if path.is_file():
-        return _load_records_from_file(path)
+        return _load_records_from_file(path, source_name=path.stem)
 
     records: List[Dict] = []
     for candidate in sorted(path.rglob('*')):
         if candidate.suffix.lower() not in {'.csv', '.json', '.jsonl'}:
             continue
-        records.extend(_load_records_from_file(candidate))
+        records.extend(_load_records_from_file(candidate, source_name=candidate.stem))
     return records
 
 
-def _load_records_from_file(path: Path) -> List[Dict]:
+def _load_records_from_file(path: Path, source_name: str = '') -> List[Dict]:
     suffix = path.suffix.lower()
     if suffix == '.csv':
         with open(path, 'r', encoding='utf-8-sig', newline='') as handle:
-            return [dict(row) for row in csv.DictReader(handle)]
+            return [_normalize_record(dict(row), source_name=source_name) for row in csv.DictReader(handle)]
 
     with open(path, 'r', encoding='utf-8') as handle:
         raw = handle.read().strip()
         if not raw:
             return []
         if suffix == '.jsonl':
-            return [json.loads(line) for line in raw.splitlines() if line.strip()]
+            return [_normalize_record(json.loads(line), source_name=source_name) for line in raw.splitlines() if line.strip()]
         loaded = json.loads(raw)
         if isinstance(loaded, list):
-            return loaded
+            return [_normalize_record(item, source_name=source_name) for item in loaded]
         if isinstance(loaded, dict):
-            return list(loaded.values())
+            return [_normalize_record(item, source_name=source_name) for item in loaded.values()]
     return []
 
 
@@ -327,7 +327,7 @@ def _infer_prereq_candidates(record: Dict, all_records: List[Dict], idx: Dict[st
 def _finalize_records(records: List[Dict]) -> List[Dict]:
     normalized = []
     for record in records:
-        candidate = _normalize_record(record)
+        candidate = _normalize_record(record, source_name=str(record.get('platform', '')))
         if candidate.get('nombre'):
             normalized.append(candidate)
 
@@ -415,7 +415,7 @@ def _build_goal_prereq_map(goal: str, idx: Dict[str, Dict], max_depth: int = 3) 
     return subgraph
 
 
-def _normalize_record(record: Dict) -> Dict:
+def _normalize_record(record: Dict, source_name: str = '') -> Dict:
     source = {str(key).strip().lower(): value for key, value in dict(record).items()}
 
     # Accept a wider set of possible field names coming from different CSVs
@@ -429,6 +429,7 @@ def _normalize_record(record: Dict) -> Dict:
     coste = _coerce_number(_first_present(source, ['coste_usd', 'cost', 'price', 'fee', 'course_fee']), default=0)
     skills = _extract_skills(_first_present(source, ['skills', 'associatedskills', 'skill', 'tags', 'topics']))
     source_label = _first_present(source, ['partner', 'institution', 'source', 'provider', 'instructor']) or ''
+    link = _first_present(source, ['link', 'url', 'course_url', 'href']) or ''
 
     if isinstance(nombre, str):
         nombre = nombre.strip()
@@ -454,6 +455,8 @@ def _normalize_record(record: Dict) -> Dict:
         'level': raw_level or '',
         'skills': skills,
         'source': source_label,
+        'link': link,
+        'platform': source_name.lower(),
     }
 
 

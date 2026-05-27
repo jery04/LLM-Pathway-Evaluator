@@ -3,6 +3,8 @@ from typing import List
 from pathlib import Path
 import importlib.util
 import types
+from html import escape
+from urllib.parse import quote_plus
 
 
 def _load_local_module(module_name: str, rel_path: str) -> types.ModuleType:
@@ -33,14 +35,79 @@ def load_data():
     return load_courses()
 
 
+def _course_link(course: dict) -> str:
+    link = str(course.get('link') or course.get('url') or course.get('href') or '').strip()
+    if link:
+        return link
+
+    title = str(course.get('nombre', '')).strip()
+    if not title:
+        return 'https://www.google.com/search'
+
+    platform = str(course.get('platform', '')).strip().lower()
+    if platform == 'edx':
+        return f'https://www.edx.org/search?q={quote_plus(title)}'
+    if platform == 'skillshare':
+        return f'https://www.skillshare.com/search?query={quote_plus(title)}'
+    if platform == 'udemy':
+        return f'https://www.udemy.com/courses/search/?q={quote_plus(title)}'
+    if platform == 'coursera':
+        return f'https://www.coursera.org/search?query={quote_plus(title)}'
+
+    return f'https://www.google.com/search?q={quote_plus(title)}'
+
+
+def _render_course_buttons(path: List[str], course_index: dict) -> None:
+    courses = [course_index.get(name) for name in path]
+    courses = [course for course in courses if course]
+    if not courses:
+        return
+
+    links = []
+    for course in courses:
+        label = str(course.get('nombre', 'Abrir curso'))
+        link = _course_link(course)
+        links.append(
+            f'<a class="course-link-word" href="{escape(link, quote=True)}" target="_blank" rel="noopener noreferrer">{escape(label)}</a>'
+        )
+
+    st.markdown(f'<div class="course-links">{"".join(links)}</div>', unsafe_allow_html=True)
+
+
 def main():
     st.set_page_config(page_title='Career Path Explorer AI')
+    st.markdown(
+        """
+        <style>
+        .course-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.9rem 0.6rem;
+            margin-top: 0.75rem;
+            margin-bottom: 0.35rem;
+        }
+        .course-link-word {
+            display: inline-block;
+            color: #4a78b8 !important;
+            text-decoration: underline;
+            font-weight: 600;
+            font-size: 0.95rem;
+            line-height: 1.35;
+        }
+        .course-link-word:hover {
+            color: #37639e !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.title('Career Path Explorer AI')
     st.markdown('Generate and compare alternative career learning paths.')
 
     courses = load_data()
     course_names = [c['nombre'] for c in courses]
+    course_index = {c['nombre']: c for c in courses}
 
     if not course_names:
         st.error('Could not load courses from local data or Kaggle. Check the data/ folder and Kaggle access if needed.')
@@ -77,7 +144,7 @@ def main():
         if not paths:
             st.warning('No paths found. Adjust goal or initial skills.')
         else:
-            st.subheader('Generated paths')
+            # Each path will be shown as a subheader (same size as previous 'Generated paths' header)
             # Get brief explanations for each path to show below each entry
             brief_explanations = []
             try:
@@ -87,16 +154,18 @@ def main():
 
             for i, p in enumerate(paths, 1):
                 target = p.get('target_course') or goal
-                st.markdown(f"**Path {i}**: {' → '.join(p['path'])}")
+                st.subheader(f"Path {i}: {' → '.join(p['path'])}")
                 # show the target course text directly in gray (no label)
                 if target:
                     st.caption(target)
                 m = p['metrics']
                 st.caption(f"Total time: {m['total_months']} months | Cost: ${m['total_cost']} | Avg difficulty: {m['avg_difficulty']}")
+
                 # show brief multi-line explanation in gray
                 if i - 1 < len(brief_explanations):
                     # st.caption accepts multi-line strings; they will appear in gray
                     st.caption(brief_explanations[i - 1])
+                _render_course_buttons(p['path'], course_index)
 
             st.subheader('Qualitative comparison (LLM)')
             explanation = explain_comparison(paths, {'goal': goal, 'skills': initial_skills, 'weekly_time': weekly_time, 'objective': goal})
