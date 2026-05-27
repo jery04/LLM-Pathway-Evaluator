@@ -79,6 +79,30 @@ def main():
     st.markdown(
         """
         <style>
+        .hero-header {
+            min-height: 16vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            text-align: center;
+            margin-bottom: 1.0rem;
+            padding-top: 0.25rem;
+        }
+        .hero-header h1 {
+            margin: 0;
+            font-size: clamp(2.0rem, 3.6vw, 3.2rem);
+            line-height: 1.02;
+            font-weight: 800;
+            letter-spacing: -0.04em;
+        }
+        .hero-header p {
+            margin: 0.05rem 0 0;
+            max-width: 46rem;
+            color: rgba(200, 200, 200, 0.9);
+            font-size: 1.0rem;
+            line-height: 1.35;
+        }
         .course-links {
             display: flex;
             flex-wrap: wrap;
@@ -102,8 +126,15 @@ def main():
         unsafe_allow_html=True,
     )
 
-    st.title('Career Path Explorer AI')
-    st.markdown('Generate and compare alternative career learning paths.')
+    st.markdown(
+        """
+        <div class="hero-header">
+            <h1>Career Path Explorer AI</h1>
+            <p>Generate and compare alternative career learning paths.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     courses = load_data()
     course_names = [c['nombre'] for c in courses]
@@ -116,7 +147,7 @@ def main():
     default_skills = ['Python'] if 'Python' in course_names else [course_names[0]]
 
     with st.form('input_form'):
-        user_text = st.text_area('Describe your goal and preferences (eg: "I want to work in web design with minimal math")', height=120)
+        user_text = st.text_area('Describe your goal and preferences (eg: "I want to learn web design")', height=120)
         initial_skills = st.multiselect('Skills you already have', options=course_names, default=default_skills)
         weekly_time = st.number_input('Weekly hours available', min_value=1, max_value=168, value=8)
         submitted = st.form_submit_button('Generate paths')
@@ -134,8 +165,8 @@ def main():
         avoid_math = parsed.get('preferences', {}).get('avoid_math', False)
         avoid_cats = {'Matemáticas'} if avoid_math else None
 
-        st.info('Generating paths...')
-        paths = generate_paths(courses, initial_skills, goal, max_paths=3, avoid_categories=avoid_cats)
+        with st.spinner('Generating paths...'):
+            paths = generate_paths(courses, initial_skills, goal, max_paths=3, avoid_categories=avoid_cats)
 
         st.caption(f'Detected goal: {goal or "not detected"}')
         if parsed.get('skills'):
