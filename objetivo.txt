@@ -1,0 +1,700 @@
+Planificación
+Planificación como búsqueda
+Un problema de planificación consiste en encontrar una secuencia de acciones 
+(un plan) para lograr cierto objetivo, que puede verse como ir de un estado inicial 
+a un estado deseado.
+¿Suena conocido?
+La diferencia es que ahora los estados no son atómicos, sino que tienen 
+estructura interna.
+Planificación clásica: STRIPS (
+St
+anford R
+esearch I
+nstitute 
+Problem S
+Representación de un problema de planificación clásico:  
+● Estado inicial.  
+● Descripción del objetivo que se desea conseguir.  
+● Conjunto de acciones.
+olver)
+STRIPS básico
+● Uso de predicados (lógica de primer orden).  
+● Sólo literales positivos.  
+● Sólo conjunciones de literales simples en el objetivo.  
+● Sólo se especifica aquello que cambia.  
+● Hipótesis de mundo cerrado.
+Representación de acciones en STRIPS
+Acción
+Nombre de la acción 
+Precondiciones 
+Proposiciones que deben cumplirse para poder aplicar la acción.
+Efectos 
+Consecuencias de la aplicación de la acción.  
+● “Add list” (proposiciones proposiciones que pasan a ser ciertas ciertas)  
+● “Delete list” (proposiciones proposiciones que pasan a ser falsas)
+Formalización
+Una instancia de STRIPS es una tupla <P,O,I,G>
+, donde:
+●
+●
+P  es un conjunto de 
+condiciones
+ (es decir, variables proposicionales).
+O es un conjunto de 
+operadores
+ (es decir, acciones); cada operador es también una tupla                   donde cada elemento es un 
+conjunto de condiciones:
+○
+\alpha representa a las condiciones que deben ser verdaderas para que la acción pueda ejecutarse.
+○
+○
+○
+●
+\beta representa a las condiciones que deben ser falsas para que la acción pueda ejecutarse.
+\gamma representa a las condiciones se hacen verdaderas si se ejecuta la acción.
+\delta representa a las condiciones se hacen falsas si se ejecuta la acción.
+I es el estado inicial, dado por un conjunto de condiciones que son inicialmente verdaderas (todas las demás se asumen falsas).
+●
+G es la especificación del estado de meta, que está dada por una dupla <N,M> que especifica qué condiciones deben ser 
+verdaderas y 
+cuáles
+ falsas para considerar a un estado como meta.
+Un plan para una instancia es una secuencia de operadores que puede ser ejecutada desde el estado inicial, y que lleva hasta un estado 
+meta.
+Formalización
+Formalmente, un estado es un conjunto de condiciones, y se representa por el 
+conjunto de condiciones que son verdaderas en él. Las transiciones entre 
+estados se modelan mediante una función de transición, que es una función 
+que mapea estados en otros estados que resultan de aplicarles acciones a los 
+primeros. Ya que los estados se representan por conjuntos de acciones, la 
+función de transición emparentada con la instancia STRIPS <P,O,I,G> es una 
+función: sucesor: 2P x A -> 2P
+Un ejemplo
+Problema:
+Hay un mono en el laboratorio, y quiere bananas. Hay tres ubicaciones 
+en el laboratorio: A, B y C. El mono está en la ubicación A. Hay una caja 
+en la ubicación C. Hay bananas en la ubicación B, pero cuelgan del 
+techo. El mono necesita la caja para alcanzar todas las bananas.
+Estado Inicial
+MonoEn(A)
+NivelMono(abajo)
+CajaEn(C)
+BananasEn(B)
+Estado meta
+MonoTiene(Bananas)
+Acciones
+● Ir(X, Y)
+● Trepar(X)
+● Bajarse(X)
+● LlevarCaja(X, Y)
+● TomarBananas(X)
+Ir(X,Y)
+Descripción
+Ir de X a Y
+Precondición
+MonoEn(X), NivelMono(abajo)
+Poscondición
+!MonoEn(X), MonoEn(Y)
+Trepar(X)
+Descripción
+Subirse a la caja en la ubicación X
+Precondición
+MonoEn(X), CajaEn(X), NivelMono(Abajo)
+Poscondición
+!NivelMono(Abajo), NivelMono(Arriba)
+Bajarse(X)
+Descripción
+Bajarse de la caja en la ubicación X
+Precondición
+MonoEn(X), CajaEn(X), NivelMono(Arriba)
+Poscondición
+!NivelMono(Arriba), NivelMono(Abajo)
+LlevarCaja(X, Y)
+Descripción
+Llevar la caja de X a Y
+Precondición
+MonoEn(X), CajaEn(X), NivelMono(Abajo)
+Poscondición
+!CajaEn(X), CajaEn(Y), !MonoEn(X), MonoEn(Y)
+TomarBananas(X)
+Descripción
+Tomar las bananas en la ubicación X
+Precondición
+MonoEn(X), BananasEn(X), NivelMono(Arriba)
+Poscondición
+MonoTiene(Bananas)
+Tipos de Búsqueda
+● Búsqueda en el espacio de los Estados
+● Búsqueda en el espacio de los Planes
+Búsqueda en el espacio de las acciones
+● Forward / Backward chaining
+○ Usar BFS o DFS para navegar por el espacio de los planes
+○ Extremadamente lento excepto para espacios pequeños
+● Búsqueda heurística
+○ Usar A* para buscar en el espacio de los estados
+○ Posibles heurísticas: ignorar precondiciones, ignorar efectos negativos
+○ Incluso computar la heurística sigue siendo NP-Hard pero se puede aproximar
+Búsqueda en el espacio de los planes
+● Modelar como problema de satisfacibilidad
+○ Convertir las acciones en proposiciones (instanciando las variables)
+○ Añadir restricciones de que 2 acciones no pueden ocurrir a la misma vez
+○ Aplicar un algoritmo de CSP (SAT) para resolver
+● Búsqueda con metaheurísticas
+○ Cada plan es un individuo
+○ Operadores de modificación de planes
+○ Hay que tener cuidado con dejar siempre planes válidos (o modelar la invalidez)
+● Aprendizaje por refuerzo
+○ (Semestre siguiente)
+Más allá de la planificación clásica
+● Planificación jerárquica
+○ Cada acción puede ser atómica, o descomponerse en más sub-acciones
+● Entornos parcialmente observables o no-deterministas
+○ Las acciones no están totalmente especificadas.
+○ Al ejecutar el plan pueden aparecer predicados que no estaban declarados en las acciones
+● Restricciones de recursos
+○ Las acciones pueden tener costos en recursos y/o tiempo
+○ Se quiere no solo el plan más corto, sino el plan que minimice ciertos recursos
+○ Los recursos pueden ser modelados como valores numéricos en vez de átomos lógicos
+¿Planificación es lo mismo de antes?
+Como hemos visto, planificación es solo una manera nueva de modelar un 
+problema computacional, pero los algoritmos son los mismos.
+Esto es una constante en IA, muchas veces lo que importa no son los algoritmos, 
+sino la forma en que se conceptualiza un problema. Modelarlo de una manera 
+mejor de repente hace que sea soluble.
+Planificación es la modelación más general que tenemos para problemas donde 
+hay secuencias de decisiones, que son casi todos los problemas.
+¿Porqué es buena esta modelación?
+Noten que para movernos hacia una definición más general de los problemas, lo 
+que hemos hecho realmente es crearnos un lenguaje de programación donde se 
+"declara" el problema, y la solución la encuentra la computadora.
+De cierta forma esto es lo que llamamos "inteligencia" (al menos una parte de 
+ella): la capacidad de resolver problemas a partir de una definición, sin necesidad 
+de indicar cuáles son los pasos a seguir.
+Además, en estos lenguajes pueden programar los expertos del dominio, quienes 
+son los únicos que saben si el mono puede subirse a la mesa o no
+--------------------------------------------------------------------
+
+Sistemas Expertos
+Inteligencia Artificial
+Suilan Estévez-Velarde
+Facultad de Matemática y Computación
+Universidad de La Habana
+¿Qué promueven?
+La idea es que se puede codificar el conocimiento de los expertos para utilizarlo, 
+no del programador o de su creatividad, sino tratar al conocimiento como algo que 
+se puede almacenar y utilizar para que nuestro algoritmo tome decisiones.
+¿Cómo se almacena el Conocimiento?
+Debe almacenar la información estructurada como conocimiento que no son solo 
+hechos o datos dispersos también incluye reglas y generalizaciones, esquemas 
+de interpretación sobre un dominio concreto y muy bien definido.
+Base de Conocimiento
+Se concretan en conocimiento almacenado en hechos y reglas
+Hecho:        (Sujeto - Relación - Objeto) 
+Regla:   Si tuplas de esta forma existen => existen nuevas tuplas de una forma 
+específica
+              Por ejemplo la transitividad
+Una forma usual de representar Conocimiento
+ONTOLOGÍAS:
+una ontología es una definición formal de tipos, propiedades, y relaciones entre 
+entidades que realmente o fundamentalmente existen para un dominio de 
+discurso en particular.
+"una especificación formal de una conceptualización compartida", tal 
+conceptualización debe estar expresada en un lenguaje formal para que pueda 
+ser procesada por una computadora.
+Ontología
+Reglas:
+Formatos de Ontologías
+          1.  <?xml version="1.0"?>
+2.  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+3.              xmlns:dc="http://purl.org/dc/elements/1.1/"
+4.              xmlns:exterms="http://www.example.org/terms/">
+5.     <rdf:Description rdf:about="http://www.example.org/index.html">
+6.       <dc:title>Welcome</dc:title>
+7.       <exterms:editor rdf:nodeID="abc"/>
+8.     </rdf:Description>
+9.     <rdf:Description rdf:nodeID="abc">
+10.        <exterms:fullName>Fulanito De Tal</exterms:fullName>
+11.        <exterms:homePage rdf:resource="http://www.yahoo.com/fulanito.html"/>
+12.    </rdf:Description>
+13. </rdf:RDF>
+RDF y OWL
+Ejemplo de 
+RDF
+Sistema Experto incluye
+● Una Bases de Conocimiento
+● Un Modelo Situacional
+● Motor de inferencia
+Normalmente requiere además actualizar el conocimiento experto y una interfaz 
+para interactuar con el sistema experto
+Tipos de sistemas expertos
+● Basados en reglas previamente establecidas -> basados en reglas heurísticas 
+apoyadas en lógica difusa para su evaluación y aplicación.
+● Basados en casos -> aplicando razonamiento donde la solución a un problema 
+similar planteado con anterioridad se adapta al nuevo problema.
+● Basados en redes bayesianas -> basados en estadística y el teorema de Bayes
+Estos serian enfoques puros hoy en día hay muchos sistemas expertos con enfoques híbridos que 
+aparecen en casi todos lados
+¿Dónde se utilizan?
+● Monitorización
+● Diseño
+● Planificación
+● Control
+● Simulación
+● Instrucción
+● Recomendación
+● Entre otros….
+Ventajas
+Permanencia: a diferencia de un experto humano, un SE (sistema experto) no envejece, y por tanto no sufre pérdida de facultades 
+con el paso del tiempo.
+Replicación: una vez programado un SE lo podemos replicar infinidad de veces.
+Rapidez: un SE puede obtener información de una base de datos y realizar cálculos numéricos mucho más rápido que cualquier 
+ser humano.
+Bajo costo: a pesar de que el costo inicial pueda ser elevado, gracias a la capacidad de duplicación el coste finalmente es bajo.
+Entornos peligrosos: un SE puede trabajar en entornos peligrosos o dañinos para el ser humano.
+Fiabilidad: los SE no se ven afectados por condiciones externas, un humano sí (cansancio, presión, etc.).
+Consolidar varios conocimientos.
+Apoyo académico.
+Limitaciones
+Sentido común: para un Sistema Experto no hay nada obvio. Por ejemplo, un sistema experto sobre medicina podría admitir que un hombre lleva 40 
+meses embarazado, a no ser que se especifique que esto no es posible ya que un hombre no puede gestar hijos.
+Lenguaje natural: con un experto humano podemos mantener una conversación informal mientras que con un SE no podemos.
+Capacidad de aprendizaje: cualquier persona aprende con relativa facilidad de sus errores y de errores ajenos, que un SE haga esto es muy 
+complicado.
+Perspectiva global: un experto humano es capaz de distinguir cuáles son las cuestiones relevantes de un problema y separarlas de cuestiones 
+secundarias.
+Capacidad sensorial: un SE carece de sentidos.
+Flexibilidad: un humano es sumamente flexible a la hora de aceptar datos para la resolución de un problema.
+Conocimiento no estructurado: un SE no es capaz de manejar conocimiento poco estructurado.
+Un sistema experto no posee sentimientos ni puede comprender ciertas emociones y conceptos humanos como el matrimonio, la moralidad, el amor 
+o planear el futuro.
+¿Dónde podemos encontrar sistemas expertos?
+● Watson
+● Siri
+● Cortana
+● Alexa
+● Google
+● ………….
+Actualidad
+Hoy en día los sistemas expertos están por detrás de gran parte de aplicaciones y 
+es muy común su utilización como última capa como interfaz de usuario. 
+Aparecen como una capa incluso en sistemas que utilizan machine learning para 
+sus razonamientos internos pero estos sistemas expertos nos permiten controlar 
+la salida de forma que cumple reglas particulares. 
+De cierta forma nos da control sobre el sistema.
+Actualidad
+También se utilizan en muchos casos donde el conocimiento experto está bien 
+definido y organizado y existen procedimientos bien descritos. En estos casos son 
+utilizados como apoyo al experto o incluso supliendo gran parte del trabajo del 
+experto y dejando al mismo solo los casos donde no entiende la situación
+-----------------------------------------------------------------------
+
+Procesamiento de Lenguaje 
+Natural
+Inteligencia Artificial
+Suilan Estévez-Velarde
+Facultad de Matemática y Computación
+Universidad de La Habana
+User:  I am unhappy.
+ELIZA:  DO YOU THINK COMING HERE WILL HELP YOU NOT TO BE UNHAPPY
+User:  I need some help, that much seems certain.
+ELIZA:  WHAT WOULD IT MEAN TO YOU IF YOU GOT SOME HELP
+User:  Perhaps I could learn to get along with my mother.
+ELIZA:  TELL ME MORE ABOUT YOUR FAMILY
+User:  My mother takes care of me.
+ELIZA:  WHO ELSE IN YOU FAMILY TAKES CARE OF YOU
+User:  My father.
+ELIZA:  YOUR FATHER
+User:  You are like my father in some ways.
+Weizenbaum (1966)
+¿Qué importancia tiene el texto?
+Gran parte de la información de la humanidad está almacenada en texto.
+El lenguaje es el método más efectivo que tenemos de transmitir el conocimiento 
+sobre algo o de expresar cómo nos sentimos. 
+¿Cómo representamos el texto?
+El texto NO es string
+¿Qué es lenguaje natural?
+Lo que hablamos los seres humanos, en cualquier idioma y con cualquier 
+complejidad…..
+El estudio del lenguaje (todo tipo de lenguajes) desde el punto de vista de la 
+computación se llama lingüística computacional. 
+El campo de estudio que se centra en el lenguaje natural se denomina 
+Procesamiento de Lenguaje Natural (PLN) 
+¿Cómo representamos el texto?
+vectores de palabras
+Problemas:
+● Conocer todo el vocabulario 
+● Tamaño del vocabulario
+● No importa el orden
+● El contexto
+● Se repiten mucho palabras que aportan poca información
+¿Cómo representamos el texto?
+TFxIDF
+Se resuelve el problema de la relevancia de un término en un dominio
+Problemas:
+● Conocer todo el vocabulario 
+● No importa el orden
+● El contexto
+¿Cómo representamos el texto?
+N-gramas
+Un poco de contexto y se tiene el cuenta el orden
+Problemas:
+● Conocer todo el vocabulario 
+● Incrementa el vocabulario
+● Se repiten mucho palabras que aportan poca información
+● El contexto
+¿Cómo representamos el texto?
+Embeddings
+Por una lado podemos crear representaciones mucho más reducidas con una 
+"cantidad de información similar" y de cierta forma se almacena un poco de 
+contexto
+Problemas:
+● No importa el orden
+● El contexto
+¿Cómo representamos el texto?
+Como conocimiento: hechos y relaciones
+Problemas:
+● Muy difícil de extraer
+● Subjetivo
+● Recursos
+¿Cómo representamos el texto?
+El texto tiene una característica importante como tipo de dato y es que es una 
+secuencia aunque esto no siempre se utilice en su representación
+Problemas clásicos sobre texto
+● Corrección ortográfica
+● Reconocimiento de entidades
+● Postag
+● Análisis de sentimiento
+● Generación de lenguaje
+● Traducción
+● Descubrimiento de conocimiento
+● Detectar negación
+● Resumen
+● …….
+Análisis más simples
+Los tipos de análisis más sencillos son los que podemos hacer utilizando 
+algoritmos simples que ustedes conocen
+Ejemplos:
+Detectar jerga----
+Detectar direcciones
+Números de teléfono
+Fecha 
+Correos
+…
+Expresiones Regulares 
+Otros enfoques conocidos
+Utilización de gramáticas
+Ejemplo: Generación de texto
+Se utilizan para crear texto con estructura controlada. También existen enfoques 
+que utilizan aprendizaje. 
+Otros enfoques conocidos
+Aproximaciones extractivas para hacer Resumen
+Este enfoque se basa en la idea de seleccionar qué partes del texto son más 
+relevantes y combinarlas para crear un resumen
+¿Por qué el texto es tan importante?
+Entender el lenguaje
+Un poco de historia...
+Aunque hay trabajos anteriores ….
+Se puede decir que desde Turing con su artículo "Computer Machinery and 
+Intelligence" donde la prueba de inteligencia se hace a través de texto en lenguaje 
+natural. 
+Problemas que tiene el texto
+● Ambigüedad
+● Contexto 
+● Abstracción
+● Conocimiento
+● Sesgos
+● …..
+Modelos lingüísticos más utilizados
+1. Modelos formales: basados en gramáticas 
+En este caso se intenta formalizar el lenguaje.
+2. Modelos probabilísticos : basados en datos
+En este caso se considera el lenguaje una distribución sobre las oraciones.
+Normalización de texto
+1. Tokenización (Detectar palabras)
+2. Normalización de las palabras
+3. Segmentación de oraciones
+Tokenización
+Separar las palabras o los token en general.
+No es tan simple como los espacios…
+Tenemos signos de puntuación, idiomas como el japonés que no utilizan espacios 
+y caracteres que se utilizan en más de un contexto como ' o el . 
+Normalización de las palabras
+● Lematizar
+● Stemming
+Algoritmos que hacen stemming: Porter Stemmer
+Biblioteca en python: NLTK
+Segmentación de oraciones
+Lo más normal es utilizar los signos de puntuación pero incluso aquí hay 
+ambiguedad…
+Por ejemplo . puede utilizarse al final de una oración en Mr. osea en abreviaturas 
+también se utiliza.
+Bibliografía
+Speech and Language Processing
+An Introduction to Natural Language Processing, Computational Linguistics, and 
+Speech Recognition
+Third Edition draft
+Daniel Stanford Jurafsky , James H. Martin
+-----------------------------------------------------------------------
+
+Inteligencia Artificial
+Problemas de Satisfacción de Restricciones
+(CSP)
+Búsqueda
+§ Planificación: secuencia de 
+acciones
+§ El caminopara lograr el objetivo es
+lo que importa
+§ Los caminos tienen diversos costos
+y profundidad
+§ Heurísticas brindan guía específica
+al problema
+§ Identificación: asignación de 
+variables
+§ Lo importante es el objetivo en sí, 
+no el camino
+§ Todoslos caminos tienen la misma
+profundidad
+§ Algoritmos de CSP están
+especializados para problemas de 
+identificación
+Búsqueda
+§ Problemas estándar de 
+Búsqueda
+§ El estado es una “caja negra” 
+(estructura de datos arbitraria)
+§ El test objetivo es una función
+definida sobre el espacio de 
+estados
+§ La función de transición puede ser
+cualquier cosa
+§ Problemas de Satisfacción de 
+Restricciones (CSP)
+§ Casoparticular de problemas de 
+búsqueda
+§ Un estado está definido por
+variables Xi con valores dominio
+D(D puede depender de i)
+§ El test objetivo es un conjunto de 
+restricciones que especifican las
+combinaciones de valores válidas
+Ejemplo de CSP
+§ Variables:
+§ Dominio:
+WA,  NT,  Q,  NSW,  V,  SA,  T
+D = {rojo, verde, azul}
+§ Restricciones: regiones adyacentes deben tener colores distintos
+Implícita: WA ≠ NT
+Explícita: (WA, NT) ϵ {(verde,rojo), (rojo,azul),…}
+§ Una solución es una asignación que satisface las restricciones:
+{WA=rojo, NT=verde, Q=rojo, NSW=verde,
+V=rojo, SA=azul, T=verde}
+§ Formulación 1:
+§ Variables:
+§ Dominio:
+§ Restricciones:
+§ Formulación 2:
+§ Variables:
+§ Dominio:
+§ Restricciones:
+Implícitas:
+Explicítas:
+Aplicaciones
+Sudoku
+Criptoaritmética
+Algoritmo de Waltz
+§ Problemas de horarios
+§ Configuración de hardware
+§ Planificación de transporte
+§ Diagnóstico de fallas
+§ … muchosmás!
+Grafo de Restricciones
+§ CSP Binario: cada restricción relaciona (cuando más) dos nodos
+§ Grafo de Restricciones Binario: los nodos son variables y los 
+arcos muestran las restricciones
+§ Los algoritmos de CSP utilizan la estructura del grafo para 
+acelerar la búsqueda. Por ejemplo, Tasmania es un 
+subproblema independiente
+Formulación como Búsqueda
+§ Los estados están definidos por los valores asignados
+hasta el momento (asignación parcial)
+§ Estado Inicial: asignación vacía {}
+§ Función Sucesor: asigna un valor a una variable sin asignar
+§ Test Objetivo: la asignación es completa y satisface todas las
+restricciones
+… … …
+…
+Métodos de Búsqueda
+¿Qué hace DFS?
+¿Qué hace BFS?
+¿Qué dificultades tienen los métodos no-informados de búsqueda?
+… … …
+…
+Búsqueda Backtracking
+§ Backtracking Search es la búsqueda no-informada básica para
+la solución de CPS
+§ Idea 1: Una variable a la vez
+§ La asignación de variables es conmutativa: fijar un orden
+§ [WA=rojoluego NT=verde] lo mismo que [NT=verde luegoWA=rojo]
+§ Solo se considera la asignación de una variable a la vez
+§ Idea 2: Chequear restricciones a medida que se avanza
+§ Considerar solo valores  que no entren en conflicto con asingaciones
+previas
+§ Requiere un poco de cómputo comprobar las restricciones
+§ Chequeo de restricciones se hace de manera incremental (no en las 
+hojas)
+§ Permite resolver n-reinas para n≈25
+Búsqueda Backtracking
+Búsqueda Backtracking
+Backtracking = DFS + orden-de-variables + fallo-al-violar
+Mejorando Búsqueda Backtracking
+§ Ordenación:
+§ ¿Quévariable debe ser asignada a continuación?
+§ ¿En qué orden se deben probar sus valores?
+§ Filtrado: anticipar fallos inevitables
+§ Estructura: explotar la estructura del problema
+Comprobación hacia delante
+(Forward Checking)
+§ Filtrado: Mantiene un registro de las variables sin asignar y
+elimina las malas opciones
+§ Comprobación hacia delante: Elimina valores que violan una
+restricción al ser adicionada a la asignación actual
+WA SA
+NT Q
+NSW
+V
+Propagación de Restricciones
+§ Comprobación hacia delante propaga información de variables
+asignadas a variables sin asignar, pero no permite detectar todos
+los posibles fallos:
+NT Q
+WA SA
+NSW
+V
+§ NTySAnopuedenserambosazul!
+§ Propagación de restricciones: razonar de restricción en
+restricción
+Consistencia de un Arco
+§ Un arco X®Y es consistente ssi para cada x en el origen existe
+algún valor y en el destino que puede ser asignado sin violar
+ninguna restricción
+NT Q
+WA SA
+NSW
+V
+§ La comprobación hacia delante garantiza la consistencia de los
+arcos que apuntan a la nueva asignación
+§ La propagación de restricciones garantiza la consistencia de
+todos los posibles arcos
+Consistencia de Arco para un Grafo
+§ Unaforma simple de propagación es garantizar que todos los 
+arcos son consistentes
+NT Q
+WA SA
+NSW
+V
+§ Importante: Si X pierde un valor, los vecinos de X deben ser
+revisados nuevamente!
+§ La consistencia de arco detecta fallos antes que la comprobación
+hacia delante
+§ Se puedeejecutar como un preprocesamiento o luego de cada
+asignación
+§ ¿Cuál esla desventaja de la consistencia de arco?
+Consistencia de Arco para un Grafo
+Tiempo de ejecución puede ser reducido a O(n2d2)
+Limitaciones de la Consistencia de Arco
+§ Luego de garantizar la consistencia de arco:
+§ Puedequedarunasolución
+§ Pueden quedar varias soluciones
+§ Puede no haber soluciones (y no saberlo)
+§ La consistencia de arco se ejecuta dentro 
+backtracking search
+Ordenamiento por Variables
+§ Orden de las variables: Minimum remaining values (MRV)
+§ Escoger la variable con el menor número de valores factibles en su dominio
+(variable más restringida)
+§ ¿Porqué mínimo en lugar de máximo?
+§ Ordenamiento “Fail-fast” 
+Ordenamiento por Valores
+§ Orden de los valores:
+§ Dada unavariable escoger el valor menos
+restrictivo
+§ Aquel que elimina el menor número de 
+valores en las variables restantes
+§ Esto requiere cierto cómputo (e.g. volver a 
+ejecutar el filtrado)
+§ ¿Porque el menos y no el más?
+§ La combinación de todas estas ideas 
+permite resolver n-reinas para n≈1000
+Explotar la Estructura del Problema
+§ Caso extremo: subproblemas independientes
+§ Tasmania no interactúa con el continente
+§ Los subproblemas independiendes se 
+pueden identificar como componentes 
+conexas en el grafo de restricciones
+§ Si tenemos un grafo de n variables que 
+puede ser descompuesto en subproblemas
+de c variables: 
+§ Costopara el peor caso: O( (n/c) (dc) )
+§ Por ejemplo: n = 80, d=2, c=20
+§ 280= 4 mil millones años (a 10 millones nodos/sec)
+§ (4)(220) = 0.4 segundos (a 10 millones nodos/sec)
+CSP con Estructura de Árbol
+§ Teorema: Si el grafo de restricciones no tiene ciclos, el CSP puede 
+ser resuelto en O(n d2)
+§ Comparadocon el CSP general donde el peor caso es O(dn)
+CSP con Estructura de Árbol
+§ Algoritmo para CSP con estructura de árbol:
+§ Orden: Seleccionar una variable (nodo) raíz, ordenar las variables de manera
+que los padres precedan a los hijos
+§ Eliminar hacia atrás: for i=n:2   HacerConsistente(Padre(Xi), Xi)
+§ Eliminar hacia delante: for i=1:n   asigna Xi consistentemente con Padre(Xi)
+CSP con Estructura de Árbol
+§ Condicionamiento: instanciar una variable y podar el dominio de 
+sus vecinos
+§ Condicionamiento por conjunto de corte: instanciar de todas las 
+formas posibles un conjunto de variables de manera tal que el grafo 
+restante sea un árbol
+§ Comparadocon el CSP general donde el peor caso es O(dn)
+SA
+SA
+SA
+SA
+Algoritmo Iterativos para CSP
+§ Métodos de búsqueda local trabajan con estados completos, es 
+decir, con totas las variables asignadas
+§ Para aplicarlos a CSP
+§ Tomarunaasignación no factible
+§ Utilizar operadores para reasignar valores a las variables
+§ Algoritmo: mientras no está resuelto,
+§ Seleccionar variable: aleatoriamente tomar una variable en conflicto
+§ Seleccionar valor: escoger valor con menos violaciones (hill climbing)
+h(n) = total de restricciones que se violan
+Ejemplo 4-reinas
+
+Rendimiento
+§ Dado un estado inicial aleatorio existe una alta probabilidad de 
+resolver el n-reinas en un tiempo constante para un n arbitrario 
+(n=10.000.000)
+§ Esto parece cumplirse para cualquier CSP generado aleatoriamente 
+excepto aquellos en un rango cercano de R
+Heurísticas de Búsqueda Local
+Iteran de una solución a otra solución vecina
+Parten de una solución inicial 
+�
+�
+(c2,c3,c6,c7,c5,c4,c1)
+Algoritmos de Búsqueda Local
+Algoritmos Iterativos
+Exploran las soluciones vecinas
+𝑠
+Se mueven a una solución vecina
+𝑠
+𝑠
+Algoritmos de una sola solución
+Algoritmos de Recorrido
+Estructura de Vecindad:   Función 𝑁:𝑆 → 2 
+Asigna un conjunto de vecinos 𝑵(𝒔) ⊆ 𝑺 a cada solución 𝒔 ∈ 𝑺
+
+
+Metaheurística
+--------------------------------------

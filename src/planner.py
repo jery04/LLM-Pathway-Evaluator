@@ -227,9 +227,9 @@ def _infer_category_from_text(text: str) -> str:
 
 def _course_search_blob(course: Dict) -> str:
     parts = [
-        course.get('nombre', ''),
-        course.get('categoria', ''),
-        course.get('tipo', ''),
+        course.get('name', '') or course.get('nombre', ''),
+        course.get('category', '') or course.get('categoria', ''),
+        course.get('type', '') or course.get('tipo', ''),
         course.get('source', ''),
         ' '.join(course.get('skills', [])) if isinstance(course.get('skills'), list) else course.get('skills', ''),
     ]
@@ -237,14 +237,14 @@ def _course_search_blob(course: Dict) -> str:
 
 
 def _infer_category(record: Dict, fallback: str = 'General') -> str:
-    for field in ('categoria', 'subject', 'category', 'institution', 'partner', 'topic', 'domain'):
+    for field in ('category', 'categoria', 'subject', 'institution', 'partner', 'topic', 'domain'):
         candidate = record.get(field)
         if candidate not in (None, ''):
             inferred = _infer_category_from_text(str(candidate))
             if inferred != 'General':
                 return inferred
 
-    title = record.get('nombre', '')
+    title = record.get('name') or record.get('nombre', '')
     skills = ' '.join(record.get('skills', [])) if isinstance(record.get('skills'), list) else ''
     inferred = _infer_category_from_text(f'{title} {skills}')
     return inferred if inferred != 'General' else fallback
@@ -253,7 +253,7 @@ def _infer_category(record: Dict, fallback: str = 'General') -> str:
 def _score_goal_match(course: Dict, goal_text: str, goal_keywords: Set[str]) -> float:
     blob = _course_search_blob(course)
     score = 0.0
-    title = _normalize_text(course.get('nombre', ''))
+    title = _normalize_text(course.get('name', '') or course.get('nombre', ''))
 
     if goal_text and goal_text in title:
         score += 8.0
@@ -299,7 +299,7 @@ def _resolve_goal_targets(idx: Dict[str, Dict], goal: str, top_k: int = 4) -> Li
 
 def _infer_prereq_candidates(record: Dict, all_records: List[Dict], idx: Dict[str, Dict]) -> List[str]:
     title_blob = _course_search_blob(record)
-    current_rank = _level_to_rank(record.get('level') or record.get('tipo') or record.get('dificultad'))
+    current_rank = _level_to_rank(record.get('level') or record.get('type') or record.get('tipo') or record.get('difficulty') or record.get('dificultad'))
 
     if current_rank <= 1 or any(marker in title_blob for marker in ('introduction', 'fundamentals', 'basics', 'bootcamp', 'for everyone', 'beginner', 'getting started')):
         return []
@@ -328,16 +328,16 @@ def _infer_prereq_candidates(record: Dict, all_records: List[Dict], idx: Dict[st
 
     scored_candidates: List[Tuple[float, str]] = []
     for candidate_name, candidate in idx.items():
-        if candidate_name == record.get('nombre'):
+        if candidate_name == (record.get('name') or record.get('nombre')):
             continue
 
         candidate_blob = _course_search_blob(candidate)
-        candidate_rank = _level_to_rank(candidate.get('level') or candidate.get('tipo') or candidate.get('dificultad'))
+        candidate_rank = _level_to_rank(candidate.get('level') or candidate.get('type') or candidate.get('tipo') or candidate.get('difficulty') or candidate.get('dificultad'))
         score = 0.0
 
         if candidate_rank <= current_rank:
             score += 1.0
-        if candidate.get('categoria') == record.get('categoria'):
+        if (candidate.get('category') or candidate.get('categoria')) == (record.get('category') or record.get('categoria')):
             score += 0.75
         wanted_match = any(term in candidate_blob for term in wanted_terms)
         foundation_match = any(term in candidate_blob for term in ('introduction', 'fundamentals', 'basics', 'bootcamp', 'learn'))
@@ -345,7 +345,7 @@ def _infer_prereq_candidates(record: Dict, all_records: List[Dict], idx: Dict[st
             score += 2.5
         if foundation_match:
             score += 0.5
-        if candidate.get('duracion_meses', 0) <= max(1, record.get('duracion_meses', 1)):
+        if candidate.get('duration_months', candidate.get('duracion_meses', 0)) <= max(1, record.get('duration_months', record.get('duracion_meses', 1))):
             score += 0.25
 
         if wanted_terms and not wanted_match and not foundation_match:
@@ -354,7 +354,7 @@ def _infer_prereq_candidates(record: Dict, all_records: List[Dict], idx: Dict[st
         if score > 0:
             scored_candidates.append((score, candidate_name))
 
-    scored_candidates.sort(key=lambda item: (-item[0], idx[item[1]].get('duracion_meses', 0), item[1]))
+    scored_candidates.sort(key=lambda item: (-item[0], idx[item[1]].get('duration_months', idx[item[1]].get('duracion_meses', 0)), item[1]))
     return [name for _, name in scored_candidates[:2]]
 
 
@@ -362,7 +362,7 @@ def _finalize_records(records: List[Dict]) -> List[Dict]:
     normalized = []
     for record in records:
         candidate = _normalize_record(record, source_name=str(record.get('platform', '')))
-        if candidate.get('nombre'):
+        if candidate.get('name') or candidate.get('nombre'):
             normalized.append(candidate)
 
     idx = index_courses(normalized)
@@ -372,7 +372,7 @@ def _finalize_records(records: List[Dict]) -> List[Dict]:
     if len(normalized) <= 2000:
         inferred = _infer_missing_prerequisites(normalized, idx)
         for name, prereqs in inferred.items():
-            idx[name]['prerequisitos'] = prereqs
+            idx.setdefault(name, {})['prerequisites'] = prereqs
 
     return list(idx.values())
 
@@ -382,22 +382,22 @@ def _infer_missing_prerequisites(records: List[Dict], idx: Dict[str, Dict]) -> D
     by_category: Dict[str, List[Dict]] = {}
 
     for record in records:
-        category = record.get('categoria') or 'General'
+        category = record.get('category') or record.get('categoria') or 'General'
         by_category.setdefault(category, []).append(record)
 
     for category_records in by_category.values():
         category_records.sort(key=lambda item: (
-            item.get('dificultad', 0),
-            item.get('duracion_meses', 0),
-            item.get('nombre', ''),
+            item.get('difficulty', item.get('dificultad', 0)),
+            item.get('duration_months', item.get('duracion_meses', 0)),
+            item.get('name', item.get('nombre', '')),
         ))
 
     for record in records:
-        if record.get('prerequisitos'):
+        if record.get('prerequisites') or record.get('prerequisitos'):
             continue
         prereqs = _infer_prereqs_for_record(record, records, idx, by_category)
         if prereqs:
-            inferred[record['nombre']] = prereqs
+            inferred[record.get('name', record.get('nombre'))] = prereqs
 
     return inferred
 
@@ -408,17 +408,17 @@ def _infer_prereqs_for_record(record: Dict, records: List[Dict], idx: Dict[str, 
     if prereqs:
         return prereqs
 
-    category = record.get('categoria') or 'General'
-    difficulty = record.get('dificultad', 0)
-    same_category = [item for item in records if item.get('categoria') == category and item.get('nombre') != record.get('nombre')]
-    lower_difficulty = [item for item in same_category if item.get('dificultad', 0) < difficulty]
+    category = record.get('category') or record.get('categoria') or 'General'
+    difficulty = record.get('difficulty', record.get('dificultad', 0))
+    same_category = [item for item in records if (item.get('category') or item.get('categoria')) == category and (item.get('name') or item.get('nombre')) != (record.get('name') or record.get('nombre'))]
+    lower_difficulty = [item for item in same_category if (item.get('difficulty', item.get('dificultad', 0)) < difficulty)]
     if lower_difficulty:
         lower_difficulty.sort(key=lambda item: (
-            abs(difficulty - item.get('dificultad', 0)),
-            item.get('duracion_meses', 0),
-            item.get('nombre', ''),
+            abs(difficulty - item.get('difficulty', item.get('dificultad', 0))),
+            item.get('duration_months', item.get('duracion_meses', 0)),
+            item.get('name', item.get('nombre', '')),
         ))
-        return [lower_difficulty[0]['nombre']]
+        return [lower_difficulty[0].get('name', lower_difficulty[0].get('nombre'))]
 
     return []
 
@@ -436,7 +436,7 @@ def _build_goal_prereq_map(goal: str, idx: Dict[str, Dict], max_depth: int = 3) 
         if not course:
             return
 
-        prereqs = set(course.get('prerequisitos', []))
+        prereqs = set(course.get('prerequisites', course.get('prerequisitos', [])))
         if not prereqs:
             prereqs = set(_infer_prereq_candidates(course, list(idx.values()), idx))
 
@@ -453,7 +453,7 @@ def _normalize_record(record: Dict, source_name: str = '') -> Dict:
     source = {str(key).strip().lower(): value for key, value in dict(record).items()}
 
     # Accept a wider set of possible field names coming from different CSVs
-    nombre = _first_present(source, ['nombre', 'name', 'course', 'course_name', 'course title', 'course title', 'title', 'course_title'])
+    nombre = _first_present(source, ['nombre', 'name', 'course', 'course_name', 'course title', 'title', 'course_title'])
     prerequisitos = _parse_prerequisites(_first_present(source, ['prerequisitos', 'prerequisites', 'prereq', 'required_skills', 'requirements']))
     duracion = _parse_duration_to_months(_first_present(source, ['duracion_meses', 'duration_months', 'duration', 'months', 'course_duration']))
     raw_level = _first_present(source, ['nivel', 'level', 'difficulty_level'])
@@ -469,7 +469,7 @@ def _normalize_record(record: Dict, source_name: str = '') -> Dict:
         nombre = nombre.strip()
 
     enriched_category = _infer_category({
-        'nombre': nombre or '',
+        'name': nombre or '',
         'categoria': categoria,
         'subject': _first_present(source, ['subject']),
         'category': _first_present(source, ['category']),
@@ -479,13 +479,13 @@ def _normalize_record(record: Dict, source_name: str = '') -> Dict:
     }, fallback=categoria or 'General')
 
     return {
-        'nombre': nombre,
-        'prerequisitos': prerequisitos,
-        'duracion_meses': int(duracion),
-        'dificultad': int(dificultad),
-        'categoria': enriched_category,
-        'tipo': tipo,
-        'coste_USD': int(coste),
+        'name': nombre,
+        'prerequisites': prerequisitos,
+        'duration_months': int(duracion),
+        'difficulty': int(dificultad),
+        'category': enriched_category,
+        'type': tipo,
+        'cost_usd': int(coste),
         'level': raw_level or '',
         'skills': skills,
         'source': source_label,
@@ -538,10 +538,16 @@ def _coerce_number(value, default: int = 0) -> int:
 
 def _course_richness_score(course: Dict) -> int:
     score = len(_extract_skills(course.get('skills'))) * 4
-    score += len(_parse_prerequisites(course.get('prerequisitos'))) * 2
+    score += len(_parse_prerequisites(course.get('prerequisites') or course.get('prerequisitos'))) * 2
 
-    for field in ('nombre', 'categoria', 'tipo', 'level', 'source', 'link', 'platform'):
-        if course.get(field) not in (None, '', [], {}):
+    spanish_fallback = {'name': 'nombre', 'category': 'categoria', 'type': 'tipo'}
+    for field in ('name', 'category', 'type', 'level', 'source', 'link', 'platform'):
+        val = course.get(field)
+        if val in (None, '', [], {}):
+            # try Spanish fallback for a subset of fields
+            if field in spanish_fallback:
+                val = course.get(spanish_fallback[field])
+        if val not in (None, '', [], {}):
             score += 1
 
     return score
@@ -551,7 +557,7 @@ def index_courses(courses: List[Dict]) -> Dict[str, Dict]:
     indexed: Dict[str, Dict] = {}
 
     for course in courses:
-        name = course.get('nombre')
+        name = course.get('name') or course.get('nombre')
         if not name:
             continue
 
@@ -579,7 +585,7 @@ def generate_paths(courses: List[Dict], initial_skills: List[str], goal: str,
                    max_paths: int = 3, max_depth: int = 12,
                    avoid_categories: Set[str] = None) -> List[Dict]:
     idx = index_courses(courses)
-    category = {name: c.get('categoria') for name, c in idx.items()}
+    category = {name: (c.get('category') or c.get('categoria')) for name, c in idx.items()}
     goal_targets = _resolve_goal_targets(idx, goal)
     if not goal_targets and goal in idx:
         goal_targets = [goal]

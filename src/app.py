@@ -40,7 +40,7 @@ def _course_link(course: dict) -> str:
     if link:
         return link
 
-    title = str(course.get('nombre', '')).strip()
+    title = str(course.get('name') or course.get('nombre', '')).strip()
     if not title:
         return 'https://www.google.com/search'
 
@@ -65,7 +65,7 @@ def _render_course_buttons(path: List[str], course_index: dict) -> None:
 
     links = []
     for course in courses:
-        label = str(course.get('nombre', 'Abrir curso'))
+        label = str(course.get('name') or course.get('nombre') or 'Abrir curso')
         link = _course_link(course)
         links.append(
             f'<a class="course-link-word" href="{escape(link, quote=True)}" target="_blank" rel="noopener noreferrer">{escape(label)}</a>'
@@ -137,8 +137,8 @@ def main():
     )
 
     courses = load_data()
-    course_names = [c['nombre'] for c in courses]
-    course_index = {c['nombre']: c for c in courses}
+    course_names = [c.get('name') or c.get('nombre') for c in courses]
+    course_index = { (c.get('name') or c.get('nombre')): c for c in courses }
 
     if not course_names:
         st.error('Could not load courses from local data or Kaggle. Check the data/ folder and Kaggle access if needed.')
