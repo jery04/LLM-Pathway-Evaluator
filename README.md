@@ -2,7 +2,9 @@
 
 Prototipo para el proyecto "Exploración de trayectorias profesionales alternativas".
 
-La app ya soporta un catálogo mixto de cursos como `Coursera.csv`, `edx.csv`, `skillshare.csv` y `Udemy.csv`, y la comparación final del LLM termina con un `Criterio de comparación final` y una `Ruta recomendada`.
+La app modela la búsqueda como un problema de planificación con restricciones y optimización: usa prerrequisitos entre cursos, genera trayectorias válidas bajo distintos criterios y pide al LLM una comparación cualitativa final.
+
+La app trabaja con un catálogo mixto de cursos como `Coursera.csv`, `edx.csv`, `skillshare.csv` y `Udemy.csv`, y la comparación final del LLM sintetiza el mejor compromiso entre tiempo, costo y dificultad.
 
 Requisitos:
 

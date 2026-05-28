@@ -40,7 +40,7 @@ def _course_link(course: dict) -> str:
     if link:
         return link
 
-    title = str(course.get('name') or course.get('nombre', '')).strip()
+    title = str(course.get('name')).strip()
     if not title:
         return 'https://www.google.com/search'
 
@@ -75,7 +75,7 @@ def _render_course_buttons(path: List[str], course_index: dict) -> None:
 
 
 def main():
-    st.set_page_config(page_title='Career Path Explorer AI')
+    st.set_page_config(page_title='Career Path Explorer')
     st.markdown(
         """
         <style>
@@ -129,8 +129,8 @@ def main():
     st.markdown(
         """
         <div class="hero-header">
-            <h1>Career Path Explorer AI</h1>
-            <p>Generate and compare alternative career learning paths.</p>
+            <h1>Career Path Explorer</h1>
+            <p>Generate, validate, and compare alternative career paths under optimization criteria.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -144,35 +144,58 @@ def main():
         st.error('Could not load courses from local data or Kaggle. Check the data/ folder and Kaggle access if needed.')
         return
 
-    default_skills = ['Python'] if 'Python' in course_names else [course_names[0]]
+    default_python_skill = next((name for name in course_names if 'python basics' in name.lower()), None)
+    default_skills = [default_python_skill] if default_python_skill else [course_names[0]]
+    criterion_options = {
+        'Fastest path': 'rapida',
+        'Cheapest path': 'economica',
+        'Balanced path': 'balanceada',
+    }
 
     with st.form('input_form'):
-        user_text = st.text_area('Describe your goal and preferences (eg: "I want to learn web design")', height=120)
+        user_text = st.text_area('Describe your goal and constraints (for example: "I want to learn data science while avoiding math")', height=120)
         initial_skills = st.multiselect('Skills you already have', options=course_names, default=default_skills)
+        selected_criterion = st.radio(
+            'Optimization criteria',
+            options=list(criterion_options.keys()),
+            index=0,
+            horizontal=True,
+            help='Each criterion produces a different path to compare time, cost, and difficulty.'
+        )
         submitted = st.form_submit_button('Generate paths')
 
     if submitted:
-        # Si el usuario no escribe nada, mostrar mensaje simple y salir.
+        # If the user submits an empty goal, show a simple message and stop.
         if not (user_text and user_text.strip()):
-            st.info('No goal entered')
+            st.info('No goal entered.')
             return
 
         parsed = parse_input(user_text or '')
-        # Use parsed goal if available; otherwise fall back to the raw user text (better than a hardcoded role)
+        # Use the parsed goal if available; otherwise fall back to the raw user text.
         goal = parsed.get('goal') or (user_text.strip() if user_text and user_text.strip() else 'Data Scientist')
 
         avoid_math = parsed.get('preferences', {}).get('avoid_math', False)
         avoid_cats = {'Matemáticas'} if avoid_math else None
 
+        selected_criteria = [criterion_options[selected_criterion]] if selected_criterion in criterion_options else ['rapida']
+
         with st.spinner('Generating paths...'):
-            paths = generate_paths(courses, initial_skills, goal, max_paths=3, avoid_categories=avoid_cats, user_prefs=parsed.get('preferences', {}))
+            paths = generate_paths(
+                courses,
+                initial_skills,
+                goal,
+                max_paths=max(1, len(selected_criteria)),
+                avoid_categories=avoid_cats,
+                user_prefs=parsed.get('preferences', {}),
+                criteria_names=selected_criteria,
+            )
 
         st.caption(f'Detected goal: {goal or "not detected"}')
         if parsed.get('skills'):
-            st.caption(f'Skills detected by parser: {", ".join(parsed["skills"])}')
+            st.caption(f'Skills detected by the parser: {", ".join(parsed["skills"])}')
 
         if not paths:
-            st.warning('No paths found. Adjust goal or initial skills.')
+            st.warning('No valid paths were found. Adjust the goal, constraints, or existing skills.')
         else:
             # Each path will be shown as a subheader (same size as previous 'Generated paths' header)
             # Get brief explanations for each path to show below each entry
@@ -184,12 +207,13 @@ def main():
 
             for i, p in enumerate(paths, 1):
                 target = p.get('target_course') or goal
-                st.subheader(f"Path {i}: {' → '.join(p['path'])}")
+                criterion = p.get('criterion') or f'Path {i}'
+                st.subheader(f"{criterion}: {' → '.join(p['path'])}")
                 # show the target course text directly in gray (no label)
                 if target:
                     st.caption(target)
                 m = p['metrics']
-                st.caption(f"Total time: {m['total_months']} months | Cost: ${m['total_cost']} | Avg difficulty: {m['avg_difficulty']}")
+                st.caption(f"Total time: {m['total_months']} months | Cost: ${m['total_cost']} | Average difficulty: {m['avg_difficulty']}")
 
                 # show brief multi-line explanation in gray
                 if i - 1 < len(brief_explanations):

@@ -1,9 +1,9 @@
-import json
-import re
-import os
-import urllib.error
-import urllib.request
-from typing import Dict, List
+import json              # Provides tools to encode and decode JSON data
+import re                # Offers regular expressions for pattern matching and text parsing
+import os                # Interacts with the operating system (paths, files, environment)
+import urllib.error      # Contains exceptions for URL and HTTP-related errors
+import urllib.request    # Allows making HTTP requests and downloading data from URLs
+from typing import Dict, List   # Type hints for dictionaries and lists
 
 OPENAI_KEY = os.environ.get('OPENAI_API_KEY')
 HF_TOKEN = os.environ.get('HUGGINGFACEHUB_API_TOKEN') or os.environ.get('HF_TOKEN')
@@ -135,28 +135,12 @@ def parse_input(text: str) -> Dict:
     }
 
 
-def _format_paths_for_comparison(paths: List[Dict]) -> List[str]:
-    summaries = []
-    for i, path in enumerate(paths, 1):
-        metrics = path.get('metrics', {})
-        route = ' -> '.join(path.get('path', []))
-        target = path.get('target_course') or path.get('objective') or ''
-        summaries.append(
-            f'Path {i}: {route}. '
-            f'Destination: {target or "unspecified"}. '
-            f'Time: {metrics.get("total_months", "?")} months. '
-            f'Cost: {metrics.get("total_cost", "?")}. '
-            f'Avg difficulty: {metrics.get("avg_difficulty", "?")}. '
-            f'Steps: {metrics.get("steps", "?")}'
-        )
-    return summaries
-
-
 def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
-    # Prefer LLMs if available to produce explanations in the requested format (English).
+    # Prefer LLMs if available to produce explanations in a planning/optimization framing.
     prompt_header = (
-        'Format the output in English. For each path, show on one line the sequence of courses separated by " -> " and below write a clear explanation of how that path enables reaching the goal. '
-        'At the end of all paths, provide an extended and well-argued conclusion indicating which path you recommend and why. '
+        'Format the output in English. Treat the task as a planning and optimization problem over valid trajectories. '
+        'For each path, show the criterion, the sequence of courses separated by " -> ", and a concise explanation of why the trajectory is valid. '
+        'At the end, provide an extended and well-argued conclusion indicating which trajectory is recommended under the requested criteria and why. '
         'Use a professional, pedagogical tone. Plain text output.'
     )
 
@@ -164,7 +148,12 @@ def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
     for i, p in enumerate(paths, 1):
         route = ' -> '.join(p.get('path', []))
         metrics = p.get('metrics', {})
-        summary_lines.append(f'Path {i}: {route}. Time: {metrics.get("total_months", "?")} months; Cost: ${metrics.get("total_cost", "?")}; Avg difficulty: {metrics.get("avg_difficulty", "?")}')
+        criterion = p.get('criterion') or f'Path {i}'
+        summary_lines.append(
+            f'{criterion}: {route}. Time: {metrics.get("total_months", "?")} months; '
+            f'Cost: ${metrics.get("total_cost", "?")}; Avg difficulty: {metrics.get("avg_difficulty", "?")}; '
+            f'Steps: {metrics.get("steps", "?")}'
+        )
 
     prompt_body = '\n'.join(summary_lines) + '\nUser profile: ' + str(user_profile)
 
@@ -211,11 +200,12 @@ def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
     def _route_explanation(route_idx: int, p: Dict) -> str:
         path = p.get('path', [])
         metrics = p.get('metrics', {})
+        criterion = p.get('criterion') or f'Path {route_idx}'
         if not path:
-            return f'Path {route_idx}: (empty)\nNo courses available.'
+            return f'{criterion}: (empty)\nNo courses available.'
 
         explanation = []
-        explanation.append(f"{' -> '.join(path)}")
+        explanation.append(f"{criterion}: {' -> '.join(path)}")
         # Describe progression: foundations, intermediate, then target.
         if len(path) == 1:
             explanation.append(f"This path consists of a single course that acts as a gateway toward the goal. With an estimated duration of {metrics.get('total_months', '?')} months, it enables acquisition of the essential competencies directly.")
@@ -223,7 +213,10 @@ def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
             first = path[0]
             last = path[-1]
             middle = path[1:-1]
-            explanation.append(f"It starts with '{first}', which provides the necessary foundations. It then continues with {', '.join([f"'{m}'" for m in middle])} to consolidate intermediate and practical skills, and finally '{last}' focuses on the final objective.")
+            middle_text = ', '.join(f"'{m}'" for m in middle) if middle else 'the middle steps'
+            explanation.append(
+                f"It starts with '{first}', which provides the necessary foundations. It then continues with {middle_text} to consolidate intermediate and practical skills, and finally '{last}' focuses on the final objective."
+            )
             explanation.append(f"Approximate total time: {metrics.get('total_months', '?')} months; estimated cost: ${metrics.get('total_cost', '?')}; average difficulty: {metrics.get('avg_difficulty', '?')}.")
             explanation.append("This sequence respects dependencies: each step builds on the previous one to reduce failures and accelerate practical assimilation.")
 
@@ -253,13 +246,15 @@ def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
     else:
         chosen = paths[best_idx]
         rec_route = ' -> '.join(chosen.get('path', []))
-        recommendation.append(f'I recommend taking Path {best_idx + 1}: {rec_route}.')
+        rec_criterion = chosen.get('criterion') or f'Path {best_idx + 1}'
+        recommendation.append(f'I recommend taking {rec_criterion}: {rec_route}.')
         recommendation.append('Detailed argument:')
         # Provide an extended argument comparing metrics
         for i, p in enumerate(paths, 1):
             m = p.get('metrics', {})
+            criterion = p.get('criterion') or f'Path {i}'
             recommendation.append(
-                f'- Path {i}: time {m.get("total_months", "?")} months, cost ${m.get("total_cost", "?")}, avg difficulty {m.get("avg_difficulty", "?")}, steps {m.get("steps", "?")}'
+                f'- {criterion}: time {m.get("total_months", "?")} months, cost ${m.get("total_cost", "?")}, avg difficulty {m.get("avg_difficulty", "?")}, steps {m.get("steps", "?")}'
             )
 
         recommendation.append('I weighed the key factors:')
@@ -286,6 +281,7 @@ def explain_paths_brief(paths: List[Dict]) -> List[str]:
     brief = []
 
     for p in paths:
+        criterion = p.get('criterion') or 'Path'
         path = p.get('path', [])
         m = p.get('metrics', {})
         months = m.get('total_months', '?')
@@ -298,7 +294,7 @@ def explain_paths_brief(paths: List[Dict]) -> List[str]:
 
         # Compose a short 3-line paragraph describing progression, skills gained, and practical advice.
         if len(path) == 1:
-            line1 = f"Single course '{path[0]}' serves as a focused entry point to the topic."
+            line1 = f"{criterion}: single course '{path[0]}' serves as a focused entry point to the topic."
             line2 = f"This course introduces the essential concepts and practical skills needed to start working in the area."
             line3 = f"Estimated time: {months} months; cost: ${cost}; average difficulty: {difficulty}."
             s = '\n'.join([line1, line2, line3])
@@ -306,7 +302,8 @@ def explain_paths_brief(paths: List[Dict]) -> List[str]:
             first = path[0]
             last = path[-1]
             middle = path[1:-1]
-            line1 = f"Starts with '{first}' to build foundations, then {' then '.join([m for m in middle]) if middle else 'continues'} and finishes with '{last}'."
+            middle_text = ' then '.join(middle) if middle else 'continues'
+            line1 = f"{criterion}: starts with '{first}' to build foundations, then {middle_text} and finishes with '{last}'."
             line2 = f"This sequence builds practical skills step-by-step: foundations → intermediate practice → applied project or specialization."
             line3 = f"Estimated time: {months} months; cost: ${cost}; average difficulty: {difficulty}."
             line4 = "Recommend doing small projects after each intermediate course to consolidate learning."

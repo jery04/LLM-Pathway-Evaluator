@@ -610,7 +610,8 @@ def build_required_closure(goal: str, prereq_map: Dict[str, Set[str]]) -> Set[st
 def generate_paths(courses: List[Dict], initial_skills: List[str], goal: str,
                    max_paths: int = 3, max_depth: int = 12,
                    avoid_categories: Set[str] = None,
-                   user_prefs: Optional[Dict] = None) -> List[Dict]:
+                   user_prefs: Optional[Dict] = None,
+                   criteria_names: Optional[List[str]] = None) -> List[Dict]:
     idx = index_courses(courses)
     category = {name: _get_category(c) for name, c in idx.items()}
     goal_targets = _resolve_goal_targets(idx, goal)
@@ -619,36 +620,53 @@ def generate_paths(courses: List[Dict], initial_skills: List[str], goal: str,
     if not goal_targets:
         return []
 
-    profiles = [
-        {
+    criteria_profiles = {
+        'rapida': {
             'name': 'rapida',
-            'duration_weight': 1.0,
-            'difficulty_weight': 0.25,
+            'label': 'Fastest path',
+            'duration_weight': 1.2,
+            'difficulty_weight': 0.20,
             'cost_weight': 0.05,
-            'category_bias': {'Datos': -0.35, 'Web': -0.25, 'Fundamentos': -0.15},
+            'category_bias': {'Datos': -0.25, 'Web': -0.2, 'Fundamentos': -0.15},
         },
-        {
+        'economica': {
+            'name': 'economica',
+            'label': 'Cheapest path',
+            'duration_weight': 0.75,
+            'difficulty_weight': 0.20,
+            'cost_weight': 0.12,
+            'category_bias': {'Cloud': -0.15, 'Web': -0.1, 'Fundamentos': -0.1},
+        },
+        'balanceada': {
             'name': 'balanceada',
+            'label': 'Balanced path',
             'duration_weight': 1.0,
             'difficulty_weight': 0.45,
             'cost_weight': 0.08,
             'category_bias': {'IA': -0.2, 'CS': -0.1, 'Fundamentos': -0.1},
         },
-        {
+        'tecnica': {
             'name': 'tecnica',
+            'label': 'Most technical path',
             'duration_weight': 0.9,
             'difficulty_weight': 0.7,
             'cost_weight': 0.05,
             'category_bias': {'IA': -0.45, 'Matemáticas': -0.35, 'DevOps': -0.15},
         },
-        {
+        'infra': {
             'name': 'infra',
+            'label': 'Cloud / infrastructure path',
             'duration_weight': 1.0,
             'difficulty_weight': 0.35,
             'cost_weight': 0.05,
             'category_bias': {'Cloud': -0.45, 'DevOps': -0.4, 'Web': -0.15},
         },
-    ]
+    }
+
+    selected_criteria = criteria_names or ['rapida', 'economica', 'balanceada']
+    profiles = [criteria_profiles[name] for name in selected_criteria if name in criteria_profiles]
+    if not profiles:
+        profiles = [criteria_profiles['rapida'], criteria_profiles['economica'], criteria_profiles['balanceada']]
 
     results: List[Dict] = []
     seen_signatures: Set[Tuple[str, ...]] = set()
@@ -705,6 +723,7 @@ def generate_paths(courses: List[Dict], initial_skills: List[str], goal: str,
             seen_signatures.add(signature)
             solution['objective'] = goal
             solution['target_course'] = target
+            solution['criterion'] = profile.get('label', profile['name'])
             results.append(solution)
 
     # If some profiles collapsed to the same solution, try a few more greedy variations.
@@ -752,6 +771,7 @@ def generate_paths(courses: List[Dict], initial_skills: List[str], goal: str,
                 seen_signatures.add(signature)
                 solution['objective'] = goal
                 solution['target_course'] = target
+                solution['criterion'] = profile.get('label', profile['name'])
                 results.append(solution)
 
     return results
