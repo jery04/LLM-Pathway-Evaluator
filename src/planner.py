@@ -1,11 +1,17 @@
-import csv
-import heapq
-import json
-import re
-from pathlib import Path
-from typing import List, Dict, Set, Tuple, Optional
+"""planner.py
+Utilities for loading, normalizing and generating learning pathway
+plans from a catalog of online courses. Functions include loaders,
+normalizers, prerequisite inference, indexing and search heuristics.
+"""
 
+import csv                         # Reads and writes CSV (comma‑separated values) files
+import heapq                       # Implements priority queues and heap‑based algorithms
+import json                        # Loads and dumps JSON data structures
+import re                          # Provides regular expressions for pattern matching
+from pathlib import Path           # Object‑oriented filesystem path handling
+from typing import List, Dict, Set, Tuple, Optional   # Type hints for common container types
 
+# SECCION I/O and Loader ------------------------------------------------------
 KAGGLE_DATASET_ID = "everydaycodings/multi-platform-online-courses-dataset"
 KAGGLE_DOWNLOAD_DIR = Path(__file__).resolve().parent.parent / "data" / "kagglehub"
 
@@ -43,6 +49,11 @@ CATEGORY_KEYWORDS = [
 
 
 def load_courses(path: Optional[str] = None) -> List[Dict]:
+    """Load normalized courses, using cache when available.
+
+    If a cached normalized JSON exists it is returned; otherwise this
+    function loads raw records and normalizes them before caching.
+    """
     cache_file = Path(__file__).resolve().parent.parent / "data" / "normalized_courses.json"
 
     # If a cached normalized JSON exists, load and return it (single normalization run).
@@ -94,34 +105,27 @@ def load_courses(path: Optional[str] = None) -> List[Dict]:
 
     return final
 
-
-######### Helper accessors to handle mixed English/Spanish keys #########
-def _get_name(course: Dict) -> str:
-    return course.get('name') or course.get('nombre') or ''
-
-
 def _get_duration(course: Dict) -> int:
+    """Return the course duration (months) from possible fields."""
     return int(course.get('duration_months') or course.get('duracion_meses') or course.get('duration') or 0)
 
-
 def _get_cost(course: Dict) -> int:
+    """Return the numeric cost for a course from common keys."""
     return int(course.get('cost_usd') or course.get('coste_USD') or course.get('cost') or 0)
 
-
 def _get_difficulty(course: Dict) -> int:
+    """Return stored difficulty value, supporting Spanish key names."""
     return int(course.get('difficulty') or course.get('dificultad') or 0)
 
-
 def _get_category(course: Dict) -> str:
+    """Return the category string for a course, defaulting to 'General'."""
     return course.get('category') or course.get('categoria') or 'General'
 
-
-def _get_platform(course: Dict) -> str:
-    return course.get('platform') or course.get('platform') or ''
-
-
-
 def _load_kaggle_dataset(dataset_id: str) -> List[Dict]:
+    """Attempt to download a Kaggle dataset and load its records.
+
+    Gracefully returns an empty list when the kaggle client is absent.
+    """
     try:
         import kagglehub
     except ImportError:
@@ -134,20 +138,29 @@ def _load_kaggle_dataset(dataset_id: str) -> List[Dict]:
 
     return _load_records_from_path(dataset_path)
 
-
 def _load_records_from_path(path: Path) -> List[Dict]:
+    """Load all records found under a path (file or directory).
+
+    Recursively finds supported file types and returns a list of
+    normalized records by delegating to `_load_records_from_file`.
+    """
     if path.is_file():
         return _load_records_from_file(path, source_name=path.stem)
 
     records: List[Dict] = []
     for candidate in sorted(path.rglob('*')):
+        # skip unsupported file types early
         if candidate.suffix.lower() not in {'.csv', '.json', '.jsonl'}:
             continue
         records.extend(_load_records_from_file(candidate, source_name=candidate.stem))
     return records
 
-
 def _load_records_from_file(path: Path, source_name: str = '') -> List[Dict]:
+    """Read a single file and return a list of normalized records.
+
+    Supports CSV, JSON and JSONL formats. Each raw entry is passed
+    through `_normalize_record` to produce a canonical record form.
+    """
     suffix = path.suffix.lower()
     if suffix == '.csv':
         with open(path, 'r', encoding='utf-8-sig', newline='') as handle:
@@ -158,20 +171,26 @@ def _load_records_from_file(path: Path, source_name: str = '') -> List[Dict]:
         if not raw:
             return []
         if suffix == '.jsonl':
+            # JSON Lines: one JSON object per line
             return [_normalize_record(json.loads(line), source_name=source_name) for line in raw.splitlines() if line.strip()]
         loaded = json.loads(raw)
         if isinstance(loaded, list):
             return [_normalize_record(item, source_name=source_name) for item in loaded]
         if isinstance(loaded, dict):
+            # sometimes a JSON file maps IDs to entries
             return [_normalize_record(item, source_name=source_name) for item in loaded.values()]
     return []
 
-
 def _normalize_text(value) -> str:
+    """Normalize a string to lowercase trimmed form, safe for comparisons."""
     return str(value).strip().lower() if value not in (None, '') else ''
 
-
 def _extract_skills(value) -> List[str]:
+    """Extract a list of skill tokens from various possible input shapes.
+
+    Accepts lists, tuples, comma/semicolon separated strings, and
+    attempts to clean common punctuation and list separators.
+    """
     if value in (None, '', [], {}):
         return []
     if isinstance(value, list):
@@ -190,21 +209,28 @@ def _extract_skills(value) -> List[str]:
             cleaned.append(token)
     return cleaned
 
-
 def _level_to_rank(level) -> int:
+    """Map textual level labels into a coarse numerical rank.
+
+    Uses `LEVEL_RANKS` to interpret strings like 'beginner' or 'advanced'.
+    """
     text = _normalize_text(level)
     for key, value in LEVEL_RANKS.items():
         if key in text:
             return value
     return 2 if text else 1
 
-
 def _level_to_difficulty(level) -> int:
+    """Convert a coarse rank into a 1-10 difficulty estimate."""
     rank = _level_to_rank(level)
     return min(10, max(1, rank * 3))
 
-
 def _parse_duration_to_months(value) -> int:
+    """Parse free-form duration strings into months (integer).
+
+    Supports English/Spanish months, weeks and hours. Falls back to
+    a sensible minimum of 1 month when parsing fails.
+    """
     if value in (None, '', [], {}):
         return 1
     if isinstance(value, (int, float)):
@@ -214,12 +240,14 @@ def _parse_duration_to_months(value) -> int:
     if not text:
         return 1
 
+    # months, e.g. "3-5 months" or "4 months"
     months_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:-|to)?\s*(\d+(?:\.\d+)?)?\s*(months?|meses?)', text)
     if months_match:
         start = float(months_match.group(1))
         end = float(months_match.group(2)) if months_match.group(2) else start
         return max(1, int(round((start + end) / 2)))
 
+    # weeks -> approximate to months
     weeks_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:-|to)?\s*(\d+(?:\.\d+)?)?\s*(weeks?|semanas?)', text)
     if weeks_match:
         start = float(weeks_match.group(1))
@@ -227,6 +255,7 @@ def _parse_duration_to_months(value) -> int:
         weeks = (start + end) / 2
         return max(1, int(round(weeks / 4.0)))
 
+    # hours -> approximate by assuming ~20 hours per month of study
     hours_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:-|to)?\s*(\d+(?:\.\d+)?)?\s*(hours?|hrs?|h)', text)
     if hours_match:
         start = float(hours_match.group(1))
@@ -234,6 +263,7 @@ def _parse_duration_to_months(value) -> int:
         hours = (start + end) / 2
         return max(1, int(round(hours / 20.0)))
 
+    # fallback: extract digits and use them as months
     digits = ''.join(ch for ch in text if ch.isdigit() or ch == '.')
     if digits:
         try:
@@ -242,16 +272,19 @@ def _parse_duration_to_months(value) -> int:
             pass
     return 1
 
-
 def _infer_category_from_text(text: str) -> str:
+    """Return a guessed category name based on keyword matching."""
     lowered = text.lower()
     for category, keywords in CATEGORY_KEYWORDS:
         if any(keyword in lowered for keyword in keywords):
             return category
     return 'General'
 
-
 def _course_search_blob(course: Dict) -> str:
+    """Build a searchable lower-cased text blob for a course.
+
+    Useful for keyword matching and scoring functions.
+    """
     parts = [
         course.get('name', '') or course.get('nombre', ''),
         course.get('category', '') or course.get('categoria', ''),
@@ -261,8 +294,11 @@ def _course_search_blob(course: Dict) -> str:
     ]
     return ' '.join(str(part) for part in parts if part).lower()
 
-
 def _infer_category(record: Dict, fallback: str = 'General') -> str:
+    """Infer a course category using available fields and fallbacks.
+
+    Checks multiple metadata fields, then falls back to title+skills.
+    """
     for field in ('category', 'categoria', 'subject', 'institution', 'partner', 'topic', 'domain'):
         candidate = record.get(field)
         if candidate not in (None, ''):
@@ -275,31 +311,41 @@ def _infer_category(record: Dict, fallback: str = 'General') -> str:
     inferred = _infer_category_from_text(f'{title} {skills}')
     return inferred if inferred != 'General' else fallback
 
-
 def _score_goal_match(course: Dict, goal_text: str, goal_keywords: Set[str]) -> float:
+    """Score how well a course matches a goal using text heuristics.
+
+    Higher weight is given to exact matches in title and helpful keywords
+    appearing in the searchable course blob.
+    """
     blob = _course_search_blob(course)
     score = 0.0
     title = _normalize_text(course.get('name', '') or course.get('nombre', ''))
 
+    # strong title match
     if goal_text and goal_text in title:
         score += 8.0
+    # presence in broader blob
     if goal_text and goal_text in blob:
         score += 6.0
 
+    # keyword-based scoring
     for keyword in goal_keywords:
         if keyword and keyword in blob:
             score += 1.0
         elif keyword and keyword in title:
             score += 1.5
 
-    # Encourage courses that look like foundations for a role.
+    # small boost for foundational-sounding courses
     if any(term in blob for term in ('introduction', 'fundamentals', 'bootcamp', 'basics', 'learn')):
         score += 0.4
 
     return score
 
-
 def _resolve_goal_targets(idx: Dict[str, Dict], goal: str, top_k: int = 4) -> List[str]:
+    """Map a free-form goal into a short list of candidate course targets.
+
+    Uses exact name matching first, then falls back to keyword scoring.
+    """
     goal_text = _normalize_text(goal)
     if not goal_text:
         return []
@@ -308,6 +354,7 @@ def _resolve_goal_targets(idx: Dict[str, Dict], goal: str, top_k: int = 4) -> Li
     if exact_match:
         return [exact_match]
 
+    # build keyword set from the goal text and role keyword hints
     keywords = set(re.findall(r'[a-z0-9áéíóúñ+#]+', goal_text))
     keywords.update(ROLE_KEYWORDS.get(goal, []))
     if goal_text in ROLE_KEYWORDS:
@@ -322,14 +369,20 @@ def _resolve_goal_targets(idx: Dict[str, Dict], goal: str, top_k: int = 4) -> Li
     scored.sort(key=lambda item: (-item[0], item[1]))
     return [name for _, name in scored[:top_k]]
 
-
 def _infer_prereq_candidates(record: Dict, all_records: List[Dict], idx: Dict[str, Dict]) -> List[str]:
+    """Heuristic to propose short list of prerequisite candidate names.
+
+    Uses rule-based triggers to prefer foundational or shorter courses
+    that cover common prerequisite topics for the record.
+    """
     title_blob = _course_search_blob(record)
     current_rank = _level_to_rank(record.get('level') or record.get('type') or record.get('tipo') or record.get('difficulty') or record.get('dificultad'))
 
+    # skip suggestion for beginner-level content
     if current_rank <= 1 or any(marker in title_blob for marker in ('introduction', 'fundamentals', 'basics', 'bootcamp', 'for everyone', 'beginner', 'getting started')):
         return []
 
+    # topic -> recommended prerequisite term mappings
     topic_rules = [
         (['ai engineering', 'ai engineer', 'mlops'], ['python', 'statistics', 'data science', 'machine learning']),
         (['machine learning', 'deep learning', 'artificial intelligence', 'generative ai', 'nlp'], ['python', 'statistics', 'data science']),
@@ -350,6 +403,7 @@ def _infer_prereq_candidates(record: Dict, all_records: List[Dict], idx: Dict[st
             wanted_terms.extend(prereq_terms)
 
     if not wanted_terms:
+        # default to general foundations
         wanted_terms.extend(['introduction', 'fundamentals', 'basics'])
 
     scored_candidates: List[Tuple[float, str]] = []
@@ -361,8 +415,10 @@ def _infer_prereq_candidates(record: Dict, all_records: List[Dict], idx: Dict[st
         candidate_rank = _level_to_rank(candidate.get('level') or candidate.get('type') or candidate.get('tipo') or candidate.get('difficulty') or candidate.get('dificultad'))
         score = 0.0
 
+        # prefer similar-or-easier rank candidates
         if candidate_rank <= current_rank:
             score += 1.0
+        # same category is slightly preferred
         if (candidate.get('category') or candidate.get('categoria')) == (record.get('category') or record.get('categoria')):
             score += 0.75
         wanted_match = any(term in candidate_blob for term in wanted_terms)
@@ -371,9 +427,11 @@ def _infer_prereq_candidates(record: Dict, all_records: List[Dict], idx: Dict[st
             score += 2.5
         if foundation_match:
             score += 0.5
+        # prefer shorter or equal-length courses as prerequisites
         if candidate.get('duration_months', candidate.get('duracion_meses', 0)) <= max(1, record.get('duration_months', record.get('duracion_meses', 1))):
             score += 0.25
 
+        # filter out candidates that don't match any desired terms
         if wanted_terms and not wanted_match and not foundation_match:
             continue
 
@@ -383,8 +441,12 @@ def _infer_prereq_candidates(record: Dict, all_records: List[Dict], idx: Dict[st
     scored_candidates.sort(key=lambda item: (-item[0], idx[item[1]].get('duration_months', idx[item[1]].get('duracion_meses', 0)), item[1]))
     return [name for _, name in scored_candidates[:2]]
 
-
 def _finalize_records(records: List[Dict]) -> List[Dict]:
+    """Normalize raw records and optionally infer missing prerequisites.
+
+    Produces an index of canonical course objects and, for moderate-sized
+    datasets, attempts to infer prerequisites to populate the graph.
+    """
     normalized = []
     for record in records:
         candidate = _normalize_record(record, source_name=str(record.get('platform', '')))
@@ -392,9 +454,7 @@ def _finalize_records(records: List[Dict]) -> List[Dict]:
             normalized.append(candidate)
 
     idx = index_courses(normalized)
-    # For large source datasets, skip expensive prerequisite inference so the
-    # app can load quickly from the bundled CSVs. The course graph still works
-    # with explicit prerequisites when present in the source data.
+    # For large datasets skip expensive inference for performance
     if len(normalized) <= 2000:
         inferred = _infer_missing_prerequisites(normalized, idx)
         for name, prereqs in inferred.items():
@@ -402,8 +462,12 @@ def _finalize_records(records: List[Dict]) -> List[Dict]:
 
     return list(idx.values())
 
-
 def _infer_missing_prerequisites(records: List[Dict], idx: Dict[str, Dict]) -> Dict[str, List[str]]:
+    """Infer missing prerequisites for records grouped by category.
+
+    Builds helpful candidate lists by category and returns a mapping of
+    course name -> list of inferred prerequisite names.
+    """
     inferred: Dict[str, List[str]] = {}
     by_category: Dict[str, List[Dict]] = {}
 
@@ -411,6 +475,7 @@ def _infer_missing_prerequisites(records: List[Dict], idx: Dict[str, Dict]) -> D
         category = record.get('category') or record.get('categoria') or 'General'
         by_category.setdefault(category, []).append(record)
 
+    # sort each category by difficulty/duration to help pick sensible lower-level courses
     for category_records in by_category.values():
         category_records.sort(key=lambda item: (
             item.get('difficulty', item.get('dificultad', 0)),
@@ -419,6 +484,7 @@ def _infer_missing_prerequisites(records: List[Dict], idx: Dict[str, Dict]) -> D
         ))
 
     for record in records:
+        # skip if prerequisites already specified in source data
         if record.get('prerequisites') or record.get('prerequisitos'):
             continue
         prereqs = _infer_prereqs_for_record(record, records, idx, by_category)
@@ -427,13 +493,14 @@ def _infer_missing_prerequisites(records: List[Dict], idx: Dict[str, Dict]) -> D
 
     return inferred
 
-
 def _infer_prereqs_for_record(record: Dict, records: List[Dict], idx: Dict[str, Dict], by_category: Dict[str, List[Dict]]) -> List[str]:
+    """Infer prerequisites for a single record by trying rules then fallbacks."""
     del by_category
     prereqs = _infer_prereq_candidates(record, records, idx)
     if prereqs:
         return prereqs
 
+    # fallback: pick a lower-difficulty course from the same category
     category = record.get('category') or record.get('categoria') or 'General'
     difficulty = record.get('difficulty', record.get('dificultad', 0))
     same_category = [item for item in records if (item.get('category') or item.get('categoria')) == category and (item.get('name') or item.get('nombre')) != (record.get('name') or record.get('nombre'))]
@@ -448,12 +515,16 @@ def _infer_prereqs_for_record(record: Dict, records: List[Dict], idx: Dict[str, 
 
     return []
 
-
 def _build_goal_prereq_map(goal: str, idx: Dict[str, Dict], max_depth: int = 3) -> Dict[str, Set[str]]:
+    """Build a subgraph of prerequisite links for a goal up to `max_depth`.
+
+    The returned dict maps course -> set(prereq_course_names).
+    """
     subgraph: Dict[str, Set[str]] = {}
     visited: Set[str] = set()
 
     def visit(course_name: str, depth: int = 0) -> None:
+        # stop when we've either seen this node or reached maximum recursion depth
         if course_name in visited or depth > max_depth:
             return
         visited.add(course_name)
@@ -462,6 +533,7 @@ def _build_goal_prereq_map(goal: str, idx: Dict[str, Dict], max_depth: int = 3) 
         if not course:
             return
 
+        # prefer explicit prerequisites, otherwise attempt to infer
         prereqs = set(course.get('prerequisites', course.get('prerequisitos', [])))
         if not prereqs:
             prereqs = set(_infer_prereq_candidates(course, list(idx.values()), idx))
@@ -474,8 +546,12 @@ def _build_goal_prereq_map(goal: str, idx: Dict[str, Dict], max_depth: int = 3) 
     visit(goal)
     return subgraph
 
-
 def _normalize_record(record: Dict, source_name: str = '') -> Dict:
+    """Turn a raw record (various field names) into a canonical course dict.
+
+    Handles Spanish/English field name variants, normalizes types and
+    infers a cleaned category. The output is stable for indexing.
+    """
     source = {str(key).strip().lower(): value for key, value in dict(record).items()}
 
     # Accept a wider set of possible field names coming from different CSVs
@@ -519,15 +595,15 @@ def _normalize_record(record: Dict, source_name: str = '') -> Dict:
         'platform': source_name.lower(),
     }
 
-
 def _first_present(source: Dict[str, object], candidates: List[str]):
+    """Return the first non-empty candidate value from a mapping."""
     for candidate in candidates:
         if candidate in source and source[candidate] not in (None, ''):
             return source[candidate]
     return None
 
-
 def _parse_prerequisites(value) -> List[str]:
+    """Normalize various prerequisite representations into a list of names."""
     if value in (None, '', [], {}):
         return []
     if isinstance(value, list):
@@ -539,8 +615,11 @@ def _parse_prerequisites(value) -> List[str]:
         return [part for part in parts if part and part.lower() not in {'none', 'none.', 'null', 'nan'}]
     return [str(value).strip()]
 
-
 def _coerce_number(value, default: int = 0) -> int:
+    """Safely coerce various number-like inputs into an integer.
+
+    Interprets words like 'free' and strips punctuation when parsing.
+    """
     if value in (None, '', [], {}):
         return default
     if isinstance(value, bool):
@@ -561,8 +640,12 @@ def _coerce_number(value, default: int = 0) -> int:
                 return default
     return default
 
-
 def _course_richness_score(course: Dict) -> int:
+    """A simple heuristic indicating how informative a course record is.
+
+    Higher scores indicate records with more metadata, skills and
+    prerequisites which are preferred when deduplicating.
+    """
     score = len(_extract_skills(course.get('skills'))) * 4
     score += len(_parse_prerequisites(course.get('prerequisites') or course.get('prerequisitos'))) * 2
 
@@ -578,8 +661,11 @@ def _course_richness_score(course: Dict) -> int:
 
     return score
 
-
 def index_courses(courses: List[Dict]) -> Dict[str, Dict]:
+    """Build a name -> course mapping, preferring richer records.
+
+    When multiple records share the same name, the richer one wins.
+    """
     indexed: Dict[str, Dict] = {}
 
     for course in courses:
@@ -593,8 +679,11 @@ def index_courses(courses: List[Dict]) -> Dict[str, Dict]:
 
     return indexed
 
-
 def build_required_closure(goal: str, prereq_map: Dict[str, Set[str]]) -> Set[str]:
+    """Return the transitive closure of prerequisites required for `goal`.
+
+    Walks the prereq_map recursively collecting all prerequisite nodes.
+    """
     required: Set[str] = set()
 
     def visit(node: str):
@@ -606,12 +695,19 @@ def build_required_closure(goal: str, prereq_map: Dict[str, Set[str]]) -> Set[st
     visit(goal)
     return required
 
-
 def generate_paths(courses: List[Dict], initial_skills: List[str], goal: str,
                    max_paths: int = 3, max_depth: int = 12,
                    avoid_categories: Set[str] = None,
                    user_prefs: Optional[Dict] = None,
                    criteria_names: Optional[List[str]] = None) -> List[Dict]:
+    # SECCION Path Generation & Search -------------------------------------
+
+    """Generate a set of candidate learning paths to reach `goal`.
+
+    Produces multiple solutions according to different user-selected
+    criteria profiles (fastest, cheapest, balanced, etc.).
+    """
+
     idx = index_courses(courses)
     category = {name: _get_category(c) for name, c in idx.items()}
     goal_targets = _resolve_goal_targets(idx, goal)
@@ -776,7 +872,6 @@ def generate_paths(courses: List[Dict], initial_skills: List[str], goal: str,
 
     return results
 
-
 def search_best_path(
     idx: Dict[str, Dict],
     prereq_map: Dict[str, Set[str]],
@@ -788,9 +883,15 @@ def search_best_path(
     max_depth: int,
     profile: Dict,
 ) -> Optional[Dict]:
+    """Search for the best path to `goal` using an A*-like search.
+
+    The algorithm expands states represented by sets of acquired skills
+    and courses, scoring each candidate by `node_cost` + heuristic.
+    """
     start_acquired = set(initial_skills)
     start_path: List[str] = []
     start_state = frozenset(start_acquired)
+    # priority queue entries: (f_score, g_score, counter, state, path)
     queue: List[Tuple[float, float, int, frozenset, List[str]]] = []
     counter = 0
     heapq.heappush(queue, (heuristic(start_acquired, goal, idx, prereq_map), 0.0, counter, start_state, start_path))
@@ -800,6 +901,7 @@ def search_best_path(
         f_score, g_score, _, state, path = heapq.heappop(queue)
         acquired = set(state)
 
+        # success: goal already acquired
         if goal in acquired:
             return {
                 'path': path,
@@ -807,9 +909,11 @@ def search_best_path(
                 'profile': profile['name'],
             }
 
+        # depth guard
         if len(path) >= max_depth:
             continue
 
+        # compute available candidate courses that have prerequisites satisfied
         available = []
         for course in idx.keys():
             if course in acquired:
@@ -819,10 +923,12 @@ def search_best_path(
             reqs = prereq_map.get(course, set())
             if not reqs.issubset(acquired):
                 continue
+            # only consider courses that are required for the chosen goal
             if course not in required_for_goal and course != goal:
                 continue
             available.append(course)
 
+        # sort candidates by heuristic node cost, duration, then name
         available.sort(key=lambda name: (
             node_cost(name, idx, profile),
             _get_duration(idx[name]),
@@ -844,8 +950,8 @@ def search_best_path(
 
     return None
 
-
 def score_path(path: List[str], idx: Dict[str, Dict]) -> Dict:
+    """Compute simple aggregate metrics for a path of course names."""
     total_months = 0
     total_cost = 0
     difficulties = []
@@ -864,8 +970,8 @@ def score_path(path: List[str], idx: Dict[str, Dict]) -> Dict:
         'steps': len(path)
     }
 
-
 def node_cost(name: str, idx: Dict[str, Dict], profile: Dict) -> float:
+    """Compute a scalar cost for selecting a single course under a profile."""
     info = idx.get(name, {})
     category = _get_category(info)
     category_bias = profile.get('category_bias', {}).get(category, 0.0)
@@ -876,8 +982,11 @@ def node_cost(name: str, idx: Dict[str, Dict], profile: Dict) -> float:
         + category_bias
     )
 
-
 def heuristic(acquired: Set[str], goal: str, idx: Dict[str, Dict], prereq_map: Dict[str, Set[str]]) -> float:
+    """Admissible heuristic estimating remaining duration to reach goal.
+
+    Sums durations of missing required nodes as a simple lower bound.
+    """
     required = build_required_closure(goal, prereq_map) | {goal}
     missing = [node for node in required if node not in acquired]
     return sum(_get_duration(idx.get(node, {})) for node in missing)
