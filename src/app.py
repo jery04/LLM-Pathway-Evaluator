@@ -149,7 +149,6 @@ def main():
     with st.form('input_form'):
         user_text = st.text_area('Describe your goal and preferences (eg: "I want to learn web design")', height=120)
         initial_skills = st.multiselect('Skills you already have', options=course_names, default=default_skills)
-        weekly_time = st.number_input('Weekly hours available', min_value=1, max_value=168, value=8)
         submitted = st.form_submit_button('Generate paths')
 
     if submitted:
@@ -166,7 +165,7 @@ def main():
         avoid_cats = {'Matemáticas'} if avoid_math else None
 
         with st.spinner('Generating paths...'):
-            paths = generate_paths(courses, initial_skills, goal, max_paths=3, avoid_categories=avoid_cats)
+            paths = generate_paths(courses, initial_skills, goal, max_paths=3, avoid_categories=avoid_cats, user_prefs=parsed.get('preferences', {}))
 
         st.caption(f'Detected goal: {goal or "not detected"}')
         if parsed.get('skills'):
@@ -199,7 +198,7 @@ def main():
                 _render_course_buttons(p['path'], course_index)
 
             st.subheader('Qualitative comparison (LLM)')
-            explanation = explain_comparison(paths, {'goal': goal, 'skills': initial_skills, 'weekly_time': weekly_time, 'objective': goal})
+            explanation = explain_comparison(paths, {'goal': goal, 'skills': initial_skills, 'objective': goal})
             st.text_area('Explanation', value=explanation, height=240)
 
 

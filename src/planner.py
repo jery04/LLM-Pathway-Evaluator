@@ -95,6 +95,32 @@ def load_courses(path: Optional[str] = None) -> List[Dict]:
     return final
 
 
+######### Helper accessors to handle mixed English/Spanish keys #########
+def _get_name(course: Dict) -> str:
+    return course.get('name') or course.get('nombre') or ''
+
+
+def _get_duration(course: Dict) -> int:
+    return int(course.get('duration_months') or course.get('duracion_meses') or course.get('duration') or 0)
+
+
+def _get_cost(course: Dict) -> int:
+    return int(course.get('cost_usd') or course.get('coste_USD') or course.get('cost') or 0)
+
+
+def _get_difficulty(course: Dict) -> int:
+    return int(course.get('difficulty') or course.get('dificultad') or 0)
+
+
+def _get_category(course: Dict) -> str:
+    return course.get('category') or course.get('categoria') or 'General'
+
+
+def _get_platform(course: Dict) -> str:
+    return course.get('platform') or course.get('platform') or ''
+
+
+
 def _load_kaggle_dataset(dataset_id: str) -> List[Dict]:
     try:
         import kagglehub
@@ -583,9 +609,10 @@ def build_required_closure(goal: str, prereq_map: Dict[str, Set[str]]) -> Set[st
 
 def generate_paths(courses: List[Dict], initial_skills: List[str], goal: str,
                    max_paths: int = 3, max_depth: int = 12,
-                   avoid_categories: Set[str] = None) -> List[Dict]:
+                   avoid_categories: Set[str] = None,
+                   user_prefs: Optional[Dict] = None) -> List[Dict]:
     idx = index_courses(courses)
-    category = {name: (c.get('category') or c.get('categoria')) for name, c in idx.items()}
+    category = {name: _get_category(c) for name, c in idx.items()}
     goal_targets = _resolve_goal_targets(idx, goal)
     if not goal_targets and goal in idx:
         goal_targets = [goal]
@@ -636,6 +663,27 @@ def generate_paths(courses: List[Dict], initial_skills: List[str], goal: str,
 
             target_prereq_map = _build_goal_prereq_map(target, idx)
             required_for_goal = build_required_closure(target, target_prereq_map) | {target}
+
+            # If user lacks Python, try to ensure a Python course is included as an initial required step
+            if user_prefs and user_prefs.get('knows_python') is False:
+                # find a plausible Python course in the index
+                python_course = None
+                # prefer a course with 'python' in its title
+                for name, c in idx.items():
+                    if 'python' in (name or '').lower():
+                        python_course = name
+                        break
+                # fallback: any course that mentions python in the blob
+                if python_course is None:
+                    for name, c in idx.items():
+                        blob = _course_search_blob(c)
+                        if 'python' in blob:
+                            python_course = name
+                            break
+                if python_course:
+                    # enforce python_course as a prerequisite for the chosen target so it's included first
+                    target_prereq_map.setdefault(target, set()).add(python_course)
+                    required_for_goal.add(python_course)
             solution = search_best_path(
                 idx=idx,
                 prereq_map=target_prereq_map,
@@ -757,7 +805,7 @@ def search_best_path(
 
         available.sort(key=lambda name: (
             node_cost(name, idx, profile),
-            idx[name].get('duracion_meses', 0),
+            _get_duration(idx[name]),
             name,
         ))
 
@@ -783,9 +831,9 @@ def score_path(path: List[str], idx: Dict[str, Dict]) -> Dict:
     difficulties = []
     for node in path:
         info = idx.get(node, {})
-        total_months += info.get('duracion_meses', 0)
-        total_cost += info.get('coste_USD', 0)
-        d = info.get('dificultad')
+        total_months += _get_duration(info)
+        total_cost += _get_cost(info)
+        d = _get_difficulty(info)
         if d is not None:
             difficulties.append(d)
     avg_difficulty = sum(difficulties) / len(difficulties) if difficulties else 0
@@ -799,12 +847,12 @@ def score_path(path: List[str], idx: Dict[str, Dict]) -> Dict:
 
 def node_cost(name: str, idx: Dict[str, Dict], profile: Dict) -> float:
     info = idx.get(name, {})
-    category = info.get('categoria')
+    category = _get_category(info)
     category_bias = profile.get('category_bias', {}).get(category, 0.0)
     return (
-        profile.get('duration_weight', 1.0) * info.get('duracion_meses', 0)
-        + profile.get('difficulty_weight', 0.35) * info.get('dificultad', 0)
-        + profile.get('cost_weight', 0.05) * info.get('coste_USD', 0)
+        profile.get('duration_weight', 1.0) * _get_duration(info)
+        + profile.get('difficulty_weight', 0.35) * _get_difficulty(info)
+        + profile.get('cost_weight', 0.05) * _get_cost(info)
         + category_bias
     )
 
@@ -812,7 +860,7 @@ def node_cost(name: str, idx: Dict[str, Dict], profile: Dict) -> float:
 def heuristic(acquired: Set[str], goal: str, idx: Dict[str, Dict], prereq_map: Dict[str, Set[str]]) -> float:
     required = build_required_closure(goal, prereq_map) | {goal}
     missing = [node for node in required if node not in acquired]
-    return sum(idx.get(node, {}).get('duracion_meses', 0) for node in missing)
+    return sum(_get_duration(idx.get(node, {})) for node in missing)
 
 
 if __name__ == '__main__':

@@ -1,4 +1,5 @@
 import json
+import re
 import os
 import urllib.error
 import urllib.request
@@ -70,24 +71,62 @@ def parse_input(text: str) -> Dict:
     # Heuristic fallback
     lower = text.lower()
     goal = None
-    for r in COMMON_ROLES:
-        if r.lower() in lower:
-            goal = r
-            break
+    preferences = {}
+
+    # detect explicit mentions of wanting/learning (English/Spanish)
+    m = re.search(r"(?:i want to learn to|i want to learn|i want to study|quiero aprender a|quiero aprender|aprender)(?:\s+about|\s+to|\s+)([a-záéíóúñ0-9 ,]+)", lower)
+    if m:
+        raw_goal = m.group(1).strip().strip('.!?,')
+        # map some Spanish/common phrases to English course/goal names
+        mapping = {
+            'estadística computacional': 'Computational Statistics',
+            'estadistica computacional': 'Computational Statistics',
+            'estadística': 'Statistics',
+            'estadistica': 'Statistics',
+            'estadistica computacional': 'Computational Statistics',
+            'estadistica aplicada': 'Applied Statistics',
+            'estadistica aplicada': 'Applied Statistics',
+        }
+        goal = mapping.get(raw_goal, raw_goal.title())
+
+    # fallback: look for role-like keywords
     if not goal:
-        # pick first known role word
         for r in COMMON_ROLES:
-            if r.split()[0].lower() in lower:
+            if r.lower() in lower:
                 goal = r
                 break
-    preferences = {}
+
+    # preferences: detect if user says they don't know Python (english/spanish)
+    lacks_python_patterns = [r"don't know python", r"dont know python", r"do not know python", r"no sé python", r"no se python", r"no conozco python", r"no conozco a python", r"no tengo experiencia en python"]
+    knows_python = True
+    for pat in lacks_python_patterns:
+        if pat in lower:
+            knows_python = False
+            break
+    # if user mentions Python positively, set knows_python True
+    if 'python' in lower and knows_python:
+        knows_python = True
+
+    preferences['knows_python'] = knows_python
     preferences['avoid_math'] = 'matem' in lower or 'math' in lower
 
-    # naive skills extraction: find mentions of some keywords
+    # extract skills mentioned (simple heuristics English/Spanish)
     skills = []
-    for kw in ['python', 'sql', 'docker', 'kubernetes', 'aws', 'statistics', 'linear algebra', 'machine learning']:
-        if kw in lower:
+    # explicit mentions like 'I know basic statistics' / 'conozco estadística básica'
+    if re.search(r"(basic statistics|estad[ií]stica basica|estad[ií]stica b[aá]sica|basic stats)", lower):
+        skills.append('Basic Statistics')
+
+    if 'python' in lower and knows_python:
+        skills.append('Python')
+
+    # common skill keywords
+    for kw in ['sql', 'docker', 'kubernetes', 'aws', 'statistics', 'linear algebra', 'machine learning']:
+        if kw in lower and kw not in ('statistics',) :
             skills.append(kw.capitalize() if ' ' not in kw else kw.title())
+    # always include 'Statistics' if user mentions estadistica or statistics
+    if 'estad' in lower or 'statistics' in lower:
+        if 'Basic Statistics' not in skills:
+            skills.append('Statistics')
 
     return {
         'goal': goal or '',
@@ -125,7 +164,7 @@ def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
     for i, p in enumerate(paths, 1):
         route = ' -> '.join(p.get('path', []))
         metrics = p.get('metrics', {})
-        summary_lines.append(f'Ruta {i}: {route}. Tiempo: {metrics.get("total_months", "?")} meses; Coste: ${metrics.get("total_cost", "?")}; Dificultad media: {metrics.get("avg_difficulty", "?")}')
+        summary_lines.append(f'Path {i}: {route}. Time: {metrics.get("total_months", "?")} months; Cost: ${metrics.get("total_cost", "?")}; Avg difficulty: {metrics.get("avg_difficulty", "?")}')
 
     prompt_body = '\n'.join(summary_lines) + '\nUser profile: ' + str(user_profile)
 
