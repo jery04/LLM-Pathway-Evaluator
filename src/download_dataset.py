@@ -10,9 +10,9 @@ All docstrings and comments are written in English per project convention.
 
 from pathlib import Path  # Path class for filesystem path manipulation
 import shutil             # high-level file operations (copytree, copy2)
-from typing import Iterable, Optional  # Optional type hint and iterable helpers
+from typing import Optional  # Optional type hint helper
+import csv                # CSV parsing for source datasets
 import re                 # Provides regular expressions for pattern matching
-import importlib.util     # Allows dynamic loading of modules at runtime
 import json               # Handles JSON serialization and parsing
 
 try:
@@ -35,6 +35,168 @@ KAGGLE_DATASETS = [
     "khusheekapoor/coursera-courses-dataset-2021",
     "yusufdelikkaya/udemy-online-education-courses",
 ]
+
+# Column header aliases for link and name fields.
+LINK_COLUMN_ALIASES = (
+    "link",
+    "url",
+    "course url",
+    "course_url",
+    "courseurl",
+)
+
+NAME_COLUMN_ALIASES = (
+    "name",
+    "title",
+    "course",
+    "course title",
+    "course name",
+)
+
+
+def _normalize_header(value: str) -> str:
+    text = (value or "").strip().lower()
+    text = re.sub(r"[_-]+", " ", text)
+    return re.sub(r"\s+", " ", text)
+
+def _find_header(header_map: dict, aliases) -> Optional[str]:
+    for alias in aliases:
+        key = _normalize_header(alias)
+        if key in header_map:
+            return header_map[key]
+    return None
+
+def _first_value(row: dict, header_map: dict, aliases) -> str:
+    header = _find_header(header_map, aliases)
+    if not header:
+        return ""
+    return (row.get(header) or "").strip()
+
+def _parse_duration_to_months(value: str) -> int:
+    text = (value or "").strip().lower()
+    if not text:
+        return 1
+
+    month_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:[-to]+\s*(\d+(?:[.,]\d+)?)\s*)?month", text)
+    if month_match:
+        first = float(month_match.group(1).replace(",", "."))
+        second = month_match.group(2)
+        if second:
+            second_value = float(second.replace(",", "."))
+            return max(1, int(round((first + second_value) / 2)))
+        return max(1, int(round(first)))
+
+    hour_match = re.search(r"(\d+(?:[.,]\d+)?)\s*hour", text)
+    if hour_match:
+        hours = float(hour_match.group(1).replace(",", "."))
+        return max(1, int(round(hours / 40.0)))
+
+    number_match = re.search(r"(\d+(?:[.,]\d+)?)", text)
+    if number_match:
+        return max(1, int(round(float(number_match.group(1).replace(",", ".")))))
+
+    return 1
+
+def _parse_level(value: str) -> str:
+    text = (value or "").strip().lower()
+    if not text:
+        return ""
+    if "begin" in text or "intro" in text:
+        return "Beginner"
+    if "inter" in text or "medium" in text:
+        return "Intermediate"
+    if "adv" in text or "expert" in text:
+        return "Advanced"
+    return value.strip()
+
+def _parse_difficulty(row: dict, header_map: dict) -> int:
+    for key in ("difficulty level", "difficulty", "level", "rating", "course rating"):
+        header = _find_header(header_map, (key,))
+        if not header:
+            continue
+        raw = (row.get(header) or "").strip()
+        if not raw:
+            continue
+        lowered = raw.lower()
+        if any(token in lowered for token in ("begin", "intro")):
+            return 3
+        if any(token in lowered for token in ("inter", "mid")):
+            return 6
+        if any(token in lowered for token in ("adv", "expert")):
+            return 8
+        numeric = re.search(r"(\d+(?:[.,]\d+)?)", raw)
+        if numeric:
+            value = float(numeric.group(1).replace(",", "."))
+            return max(1, min(10, int(round(value))))
+    return 5
+
+def _parse_cost(row: dict, header_map: dict) -> int:
+    for key in ("price", "cost", "cost usd", "price usd"):
+        header = _find_header(header_map, (key,))
+        if not header:
+            continue
+        raw = (row.get(header) or "").strip()
+        if not raw:
+            continue
+        lowered = raw.lower()
+        if lowered in {"free", "0", "$0", "0.0"}:
+            return 0
+        numeric = re.search(r"(\d+(?:[.,]\d+)?)", raw)
+        if numeric:
+            return int(round(float(numeric.group(1).replace(",", "."))))
+    return 0
+
+def _parse_skills(row: dict, header_map: dict) -> list[str]:
+    for key in ("skills", "associatedskills", "skill", "course skills"):
+        header = _find_header(header_map, (key,))
+        if not header:
+            continue
+        raw = row.get(header) or ""
+        if not isinstance(raw, str):
+            continue
+        cleaned = raw.replace("{", "").replace("}", "").replace('"', "")
+        pieces = re.split(r"[,;|/]", cleaned)
+        skills = [piece.strip() for piece in pieces if piece and piece.strip()]
+        if skills:
+            return skills
+    return []
+
+def _parse_category(row: dict, header_map: dict) -> str:
+    for key in ("subject", "category", "topic", "field"):
+        header = _find_header(header_map, (key,))
+        if not header:
+            continue
+        value = (row.get(header) or "").strip()
+        if value:
+            return value
+    return "General"
+
+def _normalize_course_row(row: dict, header_map: dict) -> Optional[dict]:
+    link = _first_value(row, header_map, LINK_COLUMN_ALIASES)
+    if not link:
+        return None
+
+    name = _first_value(row, header_map, NAME_COLUMN_ALIASES)
+    if not name:
+        return None
+
+    duration_raw = _first_value(
+        row,
+        header_map,
+        ("duration", "course duration", "content_duration", "duration months", "duration_months"),
+    )
+    level_raw = _first_value(row, header_map, ("level", "difficulty level"))
+
+    return {
+        "name": name,
+        "duration_months": _parse_duration_to_months(duration_raw),
+        "difficulty": _parse_difficulty(row, header_map),
+        "category": _parse_category(row, header_map),
+        "cost_usd": _parse_cost(row, header_map),
+        "level": _parse_level(level_raw),
+        "skills": _parse_skills(row, header_map),
+        "link": link,
+    }
 
 def copy_dataset_to_data(source_dir: Path, target_dir: Path) -> None:
     """Copy dataset files from source_dir into target_dir.
@@ -111,60 +273,26 @@ def copy_dataset_to_data(source_dir: Path, target_dir: Path) -> None:
                 # Preserve non-CSV files with original name
                 shutil.copy2(item, destination)
 
-def data_has_csv_files(data_dir: Path) -> bool:
-    """Return True if data_dir contains any top-level CSV file.
-    Used as a quick check before trying a Kaggle download.
-    """
-    csv_dir = data_dir / "csv"
-    return csv_dir.exists() and any(
-        item.is_file() and item.suffix.lower() == ".csv" for item in csv_dir.iterdir()
-    )
-
-def _download_and_copy_dataset(dataset_id: str, data_dir: Path) -> bool:
-    """Download a Kaggle dataset and merge its files into data_dir."""
-    try:
-        path = kagglehub.dataset_download(dataset_id)
-        source_path = Path(path)
-        copy_dataset_to_data(source_path, data_dir)
-        return True
-    except Exception as e:
-        # Failure is silent; caller will handle progress reporting.
-        return False
-
 def _generate_normalized_cache(project_root: Path, data_dir: Path) -> Optional[Path]:
-    """Build normalized_courses.json from CSV files using planner helpers.
-    Return the cache path on success, or None on failure.
-    
-    Processes all CSV files and transforms records to have 'skills' field
-    instead of 'prerequisitos' following the exact structure specified.
+    """Build normalized_courses.json only from CSVs that expose a link column.
+
+    Only datasets whose header includes a link/url/course URL column are used.
+    Any row without a usable link is also discarded.
     """
     try:
-        # Locate the planner module in `src/planner.py` and import it by path
-        planner_path = project_root / "src" / "planner.py"
-        spec = importlib.util.spec_from_file_location("local_planner", str(planner_path))
-        planner = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(planner)
-
-        # Use planner's internal helpers to load and normalize records from ALL CSV files
-        records = planner._load_records_from_path(data_dir)
-        normalized = planner._finalize_records(records)
-
-        # Transform records to match the exact schema:
         transformed = []
-        for record in normalized:
-            transformed_record = {
-                "name": record.get("name", record.get("nombre", "")),
-                "duration_months": record.get("duration_months", record.get("duracion_meses", 1)),
-                "difficulty": record.get("difficulty", record.get("dificultad", 1)),
-                "category": record.get("category", record.get("categoria", "General")),
-                "cost_usd": record.get("cost_usd", record.get("coste_USD", 0)),
-                "level": record.get("level", ""),
-                "skills": record.get("skills", []),  # Use skills as primary field
-                "link": record.get("link", ""),
-            }
-            # Only add record if it has at least a name
-            if transformed_record["name"]:
-                transformed.append(transformed_record)
+        csv_dir = data_dir / "csv"
+        for csv_path in sorted(csv_dir.glob("dataset_*.csv")) if csv_dir.exists() else []:
+            with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                reader = csv.DictReader(handle)
+                header_map = {_normalize_header(name): name for name in (reader.fieldnames or []) if name}
+                if not _find_header(header_map, LINK_COLUMN_ALIASES):
+                    continue
+
+                for row in reader:
+                    normalized = _normalize_course_row(row, header_map)
+                    if normalized:
+                        transformed.append(normalized)
 
         cache = data_dir / "normalized_courses.json"
         cache.parent.mkdir(parents=True, exist_ok=True)
@@ -175,6 +303,7 @@ def _generate_normalized_cache(project_root: Path, data_dir: Path) -> Optional[P
     except Exception:
         # Fail silently here; caller will decide how to surface the error
         return None
+
 
 def main() -> None:
     """Main entry point to ensure dataset is available and cached.
@@ -190,8 +319,10 @@ def main() -> None:
     data_dir = project_root / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check if CSV files already exist
-    csv_files_exist = data_has_csv_files(data_dir)
+    csv_dir = data_dir / "csv"
+    csv_files_exist = csv_dir.exists() and any(
+        item.is_file() and item.suffix.lower() == ".csv" for item in csv_dir.iterdir()
+    )
 
     # Simple textual progress bar: each dataset download attempt plus
     # the normalization step is a unit of work. Compute total steps
@@ -225,8 +356,12 @@ def main() -> None:
         completed = total_steps
         _print_progress(100, f"processed {completed}/{total_steps} (CSV present, skipped downloads)")
     elif kagglehub:
-        for idx, dataset_id in enumerate(KAGGLE_DATASETS):
-            _download_and_copy_dataset(dataset_id, data_dir)
+        for dataset_id in KAGGLE_DATASETS:
+            try:
+                source_path = Path(kagglehub.dataset_download(dataset_id))
+                copy_dataset_to_data(source_path, data_dir)
+            except Exception:
+                pass
             if completed < total_steps:
                 completed += 1
             percent = int(completed / total_steps * 100)
@@ -246,7 +381,6 @@ def main() -> None:
 
     # Finalize
     _final_success_message()
-
 
 if __name__ == "__main__":
     main()
