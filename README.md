@@ -2,7 +2,7 @@
 
 Prototipo para el proyecto "Exploración de trayectorias profesionales alternativas".
 
-La app modela la búsqueda como un problema de planificación con restricciones y optimización: usa prerrequisitos entre cursos, genera trayectorias válidas bajo distintos criterios y pide al LLM una comparación cualitativa final.
+La app modela la búsqueda como un problema de planificación con restricciones y optimización: usa prerrequisitos entre cursos, genera trayectorias válidas bajo distintos criterios y pide a OpenAI una comparación cualitativa final.
 
 La app trabaja con un catálogo mixto de cursos como `Coursera.csv`, `edx.csv`, `skillshare.csv` y `Udemy.csv`, y la comparación final del LLM sintetiza el mejor compromiso entre tiempo, costo y dificultad.
 
@@ -21,15 +21,17 @@ Ejecutar interfaz Streamlit:
 streamlit run src/app.py
 ```
 
-Si quieres integrar OpenAI, exporta `OPENAI_API_KEY` en tu entorno.
-
-Para usar un modelo gratuito de Hugging Face, exporta:
+Para usar OpenAI, exporta:
 
 ```powershell
-$env:HUGGINGFACEHUB_API_TOKEN="tu_token"
+$env:OPENAI_API_KEY="tu_token"
 ```
 
-Si quieres probar un modelo ligero localmente, puedes cambiar `HUGGINGFACE_MODEL` por otro modelo compatible con Inference API.
+Opcionalmente, puedes cambiar el modelo con:
+
+```powershell
+$env:OPENAI_MODEL="gpt-4o-mini"
+```
 
 ## Cómo correr (paso a paso)
 
@@ -108,13 +110,12 @@ O usando el intérprete del `.venv` directamente en Windows:
 5) Variables de entorno útiles
 
 - `OPENAI_API_KEY`: clave para la API de OpenAI.
-- `HUGGINGFACEHUB_API_TOKEN`: token para Hugging Face Inference API.
+- `OPENAI_MODEL`: modelo a usar, por defecto `gpt-4o-mini`.
 
 Ejemplo (PowerShell):
 
 ```powershell
-$env:OPENAI_API_KEY = "tu_api_key"
-$env:HUGGINGFACEHUB_API_TOKEN = "tu_token"
+$env:OPENAI_API_KEY = "tu_token"
 ```
 
 Notas:
