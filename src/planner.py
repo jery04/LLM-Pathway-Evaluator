@@ -5,7 +5,6 @@ normalizers, prerequisite inference, indexing and search heuristics.
 """
 
 import json                        # Loads and dumps JSON data structures
-from difflib import SequenceMatcher  # String similarity for course-name ranking
 from pathlib import Path           # Object‑oriented filesystem path handling
 from typing import List, Dict, Set, Tuple, Optional   # Type hints for common container types
 from collections import defaultdict, deque  # Collections for graph data structures
@@ -19,6 +18,8 @@ except ImportError:
     infer_prerequisites_for_objective = None
     get_text_embedding = None
 
+SIMILARITY_THRESHOLD = 0.76
+CATEGORY_SIMILARITY_THRESHOLD = 0.82
 
 # =============================================================================
 # DATA LOADING & NORMALIZATION
@@ -48,6 +49,41 @@ def load_courses() -> List[Dict]:
             return json.load(f)
     except Exception:
         return []
+
+def _load_embeddings_data() -> Optional[Dict[str, List[float]]]:
+    """Load embeddings from data/embedding.json as {name: embedding}."""
+    embedding_path = (
+        Path(__file__).resolve().parent.parent
+        / 'data'
+        / 'embedding.json'
+    )
+
+    try:
+        if not embedding_path.exists():
+            return None
+        with open(embedding_path, encoding='utf-8') as f:
+            data = json.load(f)
+
+        if not isinstance(data, list):
+            return None
+
+        embeddings_map = {}
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+
+            name = (item.get('name') or '').strip()
+            embedding = item.get('embedding')
+            if not name or not isinstance(embedding, list):
+                continue
+
+            # Keep first seen embedding for stable behavior.
+            if name not in embeddings_map:
+                embeddings_map[name] = embedding
+
+        return embeddings_map or None
+    except Exception:
+        return None
 
 def index_courses(courses: List[Dict]) -> Dict[str, Dict]:
     """Create a lookup index for courses by name (preferring richer records).
@@ -129,9 +165,8 @@ def _cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
 
 def find_course_by_skill(
     skill: str,
-    courses: List[Dict],
     skill_index: Dict[str, Set[str]],
-    embeddings_data: Optional[List[Dict]],
+    embeddings_data: Optional[Dict[str, List[float]]],
     top_n: int = 3
 ) -> List[Dict]:
     """Find courses most similar to a given skill using embeddings.
@@ -144,7 +179,7 @@ def find_course_by_skill(
         skill: The skill or topic to search for
         courses: Preloaded course list
         skill_index: Precomputed skill -> courses index
-        embeddings_data: Preloaded embedding records from embedding.json
+        embeddings_data: Preloaded embeddings map: {course_name -> embedding}
         top_n: Number of top courses to return (default: 3)
     
     Returns:
@@ -179,10 +214,8 @@ def find_course_by_skill(
             return similarities
         
         # Calculate similarity with all courses
-        for item in embeddings_data:
-            course_name = item.get('name', '')
+        for course_name, course_embedding in embeddings_data.items():
             course_name_normalized = (course_name or '').strip().lower()
-            course_embedding = item.get('embedding', [])
             
             if not course_name_normalized or course_name_normalized in seen_courses or not course_embedding:
                 continue
@@ -205,533 +238,428 @@ def find_course_by_skill(
 
 
 # =============================================================================
-# PREREQUISITE INFERENCE & GRAPH BUILDING
+# PATH PLANNING LOGIC (DAG WITH RECURSIVE PREREQUISITES AND ALTERNATIVES)
 # =============================================================================
 
-def infer_prerequisites_for_course(
-    course: Dict,
-    all_courses: List[Dict],
-    skill_index: Dict[str, Set[str]]
-) -> List[str]:
-    """Delegates to `infer_prerequisites_for_objective` and returns its result.
+def _normalize_token(value: str) -> str:
+    """Return a normalized token for robust matching."""
+    return (value or '').strip().lower()
 
-    Llama a la función LLM con el nombre del curso y devuelve la lista
-    resultante (o una lista vacía si la función no está disponible o falla).
-    """
-    if not infer_prerequisites_for_objective:
-        return []
-
+def _safe_float(value, default: float = 0.0) -> float:
+    """Convert value to float with a default fallback."""
     try:
-        result = infer_prerequisites_for_objective((course.get('name') or '').strip())
-        # Normalizar a lista de strings (el adaptador devuelve List[str])
-        if not result:
-            return []
-        
-        return result
-    except Exception:
-        return []
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
-def build_prerequisite_graph(
-    courses: List[Dict],
-    skill_index: Optional[Dict[str, Set[str]]] = None
-) -> Dict[str, List[str]]:
-    """Build a prerequisite graph: course -> list of prerequisite courses.
-    
-    Returns: {course_name -> [prerequisite_course_names]}
-    
-    Optimized: only compute prerequisites for a subset of courses.
-    """
-    if skill_index is None:
-        skill_index = build_skill_index(courses)
-    prereq_graph: Dict[str, List[str]] = {}
-    
-    # Only process courses with non-trivial difficulty (avoid 44k full iteration)
-    for i, course in enumerate(courses):
-        # Sample: process every Nth course + high-difficulty courses
-        if i % 50 != 0 and course.get('difficulty', 0) < 7:
-            continue
-        
-        name = (course.get('name') or '').strip()
-        if name:
-            prereq_graph[name] = infer_prerequisites_for_course(course, [], skill_index)
-    
-    return prereq_graph
+def _course_metrics(course: Dict) -> Dict[str, float]:
+    """Extract numeric metrics used for optimization criteria."""
+    return {
+        'duration_months': _safe_float(course.get('duration_months'), 1.0),
+        'cost_usd': _safe_float(course.get('cost_usd'), 0.0),
+        'difficulty': _safe_float(course.get('difficulty'), 3.0),
+    }
 
+def _score_course_for_criterion(course: Dict, criterion_name: str) -> float:
+    """Compute a scalar optimization score for a single course."""
+    m = _course_metrics(course)
+    c = _normalize_token(criterion_name)
 
-# =============================================================================
-# SEARCH HEURISTICS & PATH FINDING
-# =============================================================================
+    # Accept both original Spanish tokens and the new English labels.
+    if c in ('economica', 'cheapest path'):
+        return m['cost_usd'] + 0.35 * m['duration_months'] + 0.2 * m['difficulty']
+    if c in ('rapida', 'fastest path'):
+        return m['duration_months'] + 0.001 * m['cost_usd'] + 0.25 * m['difficulty']
 
-def find_courses_by_goal(
-    goal: str,
-    courses: List[Dict],
-    category_index: Dict[str, Set[str]],
-    skill_index: Dict[str, Set[str]]
-) -> Set[str]:
-    """Find courses relevant to a user's goal.
-    
-    Matches goal against course names, categories, and skills.
-    Returns a set of course names.
-    """
-    result = set()
-    goal_lower = (goal or '').lower().strip()
-    
-    # Match by course name
-    for course in courses:
-        name = (course.get('name') or '').lower()
-        if goal_lower in name or name in goal_lower:
-            result.add((course.get('name') or '').strip())
-    
-    # Match by category
-    for category, courses_in_cat in category_index.items():
-        if goal_lower in category or category in goal_lower:
-            result.update(courses_in_cat)
-    
-    # Match by skill
-    for skill, courses_teaching in skill_index.items():
-        if goal_lower in skill or skill in goal_lower:
-            result.update(courses_teaching)
-    
-    return result
+    # Balanced: simple weighted combination for robust ranking.
+    return 0.5 * m['duration_months'] + 0.002 * m['cost_usd'] + 0.4 * m['difficulty']
 
-def _topological_sort_subset(
-    courses_subset: Set[str],
-    prereq_graph: Dict[str, List[str]]
+def _sort_courses_by_criterion(
+    course_names: List[str],
+    course_index: Dict[str, Dict],
+    criterion_name: str,
 ) -> List[str]:
-    """Topological sort of courses respecting prerequisite constraints.
-    
-    Returns a sorted list where prerequisites come before dependents.
-    If a prerequisite is not in the subset, it's ignored.
-    """
-    in_degree = {c: 0 for c in courses_subset}
-    adj_list = {c: [] for c in courses_subset}
-
-    for course in courses_subset:
-        prereqs = prereq_graph.get(course) or []
-        for prereq in prereqs:
-            if prereq in courses_subset:
-                adj_list[prereq].append(course)
-                in_degree[course] += 1
-    
-    queue = deque([c for c in courses_subset if in_degree[c] == 0])
-    result = []
-    
-    while queue:
-        node = queue.popleft()
-        result.append(node)
-        for neighbor in adj_list[node]:
-            in_degree[neighbor] -= 1
-            if in_degree[neighbor] == 0:
-                queue.append(neighbor)
-    
-    # If graph has cycles, return whatever we have
-    return result if len(result) == len(courses_subset) else list(courses_subset)
-
-def validate_path_constraints(
-    path: List[str],
-    courses_index: Dict[str, Dict],
-    constraints: Dict
-) -> bool:
-    """Validate that a path satisfies user constraints.
-    
-    Constraints dict may include:
-    - max_months: maximum total duration
-    - max_cost: maximum total cost
-    - max_difficulty: maximum average difficulty
-    - min_difficulty: minimum average difficulty
-    - required_skills: skills that must be covered
-    """
-    if not path:
-        return True
-    
-    # Calculate metrics
-    total_months = sum(courses_index.get(c, {}).get('duration_months', 0) for c in path)
-    total_cost = sum(courses_index.get(c, {}).get('cost_usd', 0) for c in path)
-    difficulties = [courses_index.get(c, {}).get('difficulty', 5) for c in path]
-    avg_difficulty = sum(difficulties) / len(difficulties) if difficulties else 5
-    
-    # Check constraints
-    if constraints.get('max_months') and total_months > constraints['max_months']:
-        return False
-    if constraints.get('max_cost') and total_cost > constraints['max_cost']:
-        return False
-    if constraints.get('max_difficulty') and avg_difficulty > constraints['max_difficulty']:
-        return False
-    if constraints.get('min_difficulty') and avg_difficulty < constraints['min_difficulty']:
-        return False
-    
-    # Check required skills coverage
-    required_skills = set(
-        (s or '').lower().strip() 
-        for s in (constraints.get('required_skills') or [])
+    """Return course names ordered from best to worst for criterion."""
+    return sorted(
+        [name for name in course_names if name in course_index],
+        key=lambda name: _score_course_for_criterion(course_index[name], criterion_name),
     )
-    if required_skills:
-        covered_skills = set()
-        for course_name in path:
-            course = courses_index.get(course_name, {})
-            skills = course.get('skills') or []
-            covered_skills.update((s or '').lower().strip() for s in skills)
-        
-        if not required_skills.issubset(covered_skills):
+
+def _is_skill_covered(skill: str, known_skills: List[str]) -> bool:
+    """Return True if a skill is already covered by user-known skills."""
+
+    s = _normalize_token(skill)
+    if not s:
+        return True
+
+    skill_embedding = get_text_embedding(s)
+    if not skill_embedding:
+        return False
+
+    for known in known_skills:
+        k = _normalize_token(known)
+        if not k:
+            continue
+
+        # Fast lexical match
+        if s == k or s in k or k in s:
+            return True
+
+        known_embedding = get_text_embedding(k)
+        if not known_embedding:
+            continue
+
+        similarity = _cosine_similarity(
+            skill_embedding,
+            known_embedding
+        )
+
+        if similarity >= SIMILARITY_THRESHOLD:
+            return True
+
+    return False
+
+def _passes_category_filter(
+    course: Dict,
+    avoid_categories: List[str],
+    embeddings: Dict[str, List[float]]
+) -> bool:
+    """Reject courses whose embeddings are too close to avoided categories."""
+
+    if not avoid_categories:
+        return True
+
+    course_name = (course.get("name") or "").strip()
+    if not course_name:
+        return True
+
+    course_embedding = embeddings.get(course_name)
+    if not course_embedding:
+        return True
+
+    for category in avoid_categories:
+        category = _normalize_token(category)
+        if not category:
+            continue
+
+        category_embedding = get_text_embedding(category)
+        if not category_embedding:
+            continue
+
+        similarity = _cosine_similarity(
+            course_embedding,
+            category_embedding
+        )
+
+        if similarity >= CATEGORY_SIMILARITY_THRESHOLD:
             return False
-    
+
     return True
 
-# =============================================================================
-# PATH GENERATION WITH OPTIMIZATION CRITERIA
-# =============================================================================
-
-def _search_path_by_criterion(
-    start_courses: Set[str],
-    goal_courses: Set[str],
-    courses_index: Dict[str, Dict],
-    prereq_graph: Dict[str, List[str]],
-    criterion: str = 'balanced',
-    constraints: Dict = None,
-    max_length: int = 7,
-    max_candidates: int = 500
-) -> Optional[List[str]]:
-    """Search for an optimal path from start_courses towards goal_courses.
-    
-    Criterion: 'fastest', 'cheapest', 'easiest', 'balanced'
-    Uses greedy search with limited neighborhood.
-    Optimized for large course catalogs.
-    """
-    if not constraints:
-        constraints = {}
-    
-    # Limit goal courses to top candidates
-    goal_list = list(goal_courses)[:max_candidates]
-    if not goal_list:
-        return None
-    
-    # Start with the best goal course
-    best_course = min(
-        goal_list,
-        key=lambda c: _score_course(c, courses_index, criterion)
-    )
-    
-    path = [best_course]
-    visited = {best_course}
-    
-    # Greedy expansion: add courses that improve the path
-    for iteration in range(max_length - 1):
-        current_course = path[-1]
-        
-        # Get limited set of candidates
-        candidates = set()
-        
-        # Add prerequisites (if any)
-        prereqs = prereq_graph.get(current_course, [])
-        if prereqs:
-            candidates.update(list(prereqs)[:5])
-        
-        # Add related courses by skill
-        skills = courses_index.get(current_course, {}).get('skills', [])
-        if skills:
-            # Try multiple skills to get more diversity
-            for skill in skills[:5]:
-                skill_lower = (skill or '').lower().strip()
-                # Look for other courses with similar skills
-                for cname in list(courses_index.keys())[::max(1, len(courses_index) // 500)]:
-                    if cname not in visited:
-                        cdata = courses_index.get(cname, {})
-                        cskills = cdata.get('skills', [])
-                        if any((s or '').lower().strip() == skill_lower for s in cskills):
-                            candidates.add(cname)
-                            if len(candidates) >= 50:
-                                break
-                if len(candidates) >= 50:
-                    break
-        
-        # Also add courses from same category (for diversity)
-        current_category = courses_index.get(current_course, {}).get('category', '').lower()
-        if current_category:
-            for cname, cdata in list(courses_index.items())[::max(1, len(courses_index) // 300)]:
-                if cname not in visited and cdata.get('category', '').lower() == current_category:
-                    candidates.add(cname)
-                    if len(candidates) >= 50:
-                        break
-        
-        # Filter out courses that violate constraints
-        candidates = list(candidates - visited)
-        valid_candidates = []
-        for cand in candidates:
-            if validate_path_constraints(path + [cand], courses_index, constraints):
-                valid_candidates.append(cand)
-        
-        candidates = valid_candidates[:30]  # Keep top 30
-        
-        if not candidates:
-            break
-        
-        # Select best candidate
-        best_next = min(
-            candidates,
-            key=lambda c: _score_course(c, courses_index, criterion)
+def _get_candidate_courses_for_skill(
+    skill: str,
+    skill_index: Dict[str, Set[str]],
+    embeddings_data: Optional[Dict[str, List[float]]],
+    course_index: Dict[str, Dict],
+    avoid_categories: Optional[Set[str]],
+    criterion_name: str,
+    top_n: int = 4,
+) -> List[str]:
+    """Find and rank candidate courses that can cover a required skill."""
+    candidates = []
+    try:
+        candidates = find_course_by_skill(
+            skill=skill,
+            skill_index=skill_index,
+            embeddings_data=embeddings_data,
+            top_n=max(6, top_n),
         )
-        
-        path.append(best_next)
-        visited.add(best_next)
-    
-    # Ensure minimum path length for meaningful trayectories
-    return path if len(path) >= 2 else None
+    except Exception:
+        candidates = []
 
-def _score_course(course_name: str, courses_index: Dict[str, Dict], criterion: str) -> float:
-    """Score a single course based on criterion."""
-    course = courses_index.get(course_name, {})
-    
-    if criterion == 'fastest':
-        return course.get('duration_months', 6)
-    elif criterion == 'cheapest':
-        return course.get('cost_usd', 100)
-    elif criterion == 'easiest':
-        return -course.get('difficulty', 5)  # Negative for min-heap
-    elif criterion == 'balanced':
-        # Weighted score
-        months = course.get('duration_months', 6) / 12  # Normalize to years
-        cost = course.get('cost_usd', 100) / 1000
-        difficulty = course.get('difficulty', 5) / 10
-        return (months + cost + difficulty) / 3
-    else:
-        return course.get('difficulty', 5)
+    names = []
+    for item in candidates:
+        name = (item.get('name') or '').strip()
+        if name not in course_index:
+            continue
+        if not _passes_category_filter(
+            course_index[name],
+            avoid_categories,
+            embeddings_data or {},
+        ):
+            continue
+        names.append(name)
 
-def _score_path(path: List[str], courses_index: Dict[str, Dict], criterion: str) -> float:
-    """Score an entire path based on criterion."""
-    total_months = sum(courses_index.get(c, {}).get('duration_months', 0) for c in path)
-    total_cost = sum(courses_index.get(c, {}).get('cost_usd', 0) for c in path)
-    difficulties = [courses_index.get(c, {}).get('difficulty', 5) for c in path]
-    avg_difficulty = sum(difficulties) / len(difficulties) if difficulties else 5
-    
-    if criterion == 'fastest':
-        return total_months
-    elif criterion == 'cheapest':
-        return total_cost
-    elif criterion == 'easiest':
-        return -avg_difficulty  # Negative for min-heap
-    elif criterion == 'balanced':
-        months_norm = total_months / (len(path) * 12) if path else 1
-        cost_norm = total_cost / (len(path) * 500) if path else 1
-        diff_norm = avg_difficulty / 10
-        return (months_norm + cost_norm + diff_norm) / 3
-    else:
-        return len(path)
+    names = _sort_courses_by_criterion(names, course_index, criterion_name)
+    return names[:top_n]
 
-def _calculate_path_metrics(path: List[str], courses_index: Dict[str, Dict]) -> Dict:
-    """Calculate metrics for a path."""
-    metrics = {
-        'total_months': 0,
-        'total_cost': 0,
-        'avg_difficulty': 0,
-        'steps': len(path)
+def _infer_prereq_skills_for_topic(
+    topic: str,
+    cache: Dict[str, List[str]],
+) -> List[str]:
+    """Infer prerequisite skills for a topic using existing LLM adapter function."""
+    normalized_topic = _normalize_token(topic)
+    if not normalized_topic:
+        return []
+
+    if normalized_topic in cache:
+        return cache[normalized_topic]
+
+    if infer_prerequisites_for_objective is None:
+        cache[normalized_topic] = []
+        return []
+
+    try:
+        inferred = infer_prerequisites_for_objective(topic) or []
+    except Exception:
+        inferred = []
+
+    cleaned = []
+    seen = set()
+    for item in inferred:
+        token = _normalize_token(item)
+        if not token or token in seen or token == normalized_topic:
+            continue
+        seen.add(token)
+        cleaned.append(item.strip())
+
+    cache[normalized_topic] = cleaned
+    return cleaned
+
+def _infer_prereq_skills_for_course(
+    course: Dict,
+    prereq_cache: Dict[str, List[str]],
+) -> List[str]:
+    """Infer direct prerequisite skills for a course.
+
+    Beginner courses are considered foundational and return no dependencies.
+    """
+    level = _normalize_token(course.get('level') or '')
+    if 'beginner' in level:
+        return []
+
+    name = (course.get('name') or '').strip()
+    if not name:
+        return []
+
+    prereqs = _infer_prereq_skills_for_topic(name, prereq_cache)
+    if prereqs:
+        return prereqs
+
+    # Fallback: infer from one representative skill if title-based inference fails.
+    skills = [s for s in (course.get('skills') or []) if _normalize_token(s)]
+    if skills:
+        return _infer_prereq_skills_for_topic(skills[0], prereq_cache)
+
+    return []
+
+def _resolve_route_for_target_course(
+    target_course_name: str,
+    courses: List[Dict],
+    course_index: Dict[str, Dict],
+    skill_index: Dict[str, Set[str]],
+    embeddings_data: Optional[Dict[str, List[float]]],
+    initial_skills: List[str],
+    criterion_name: str,
+    avoid_categories: Optional[Set[str]],
+    prereq_cache: Dict[str, List[str]],
+) -> Dict:
+    """Expand prerequisites recursively into a DAG and return a complete plan."""
+    if target_course_name not in course_index:
+        return {}
+
+    edges = defaultdict(set)  # prereq_course -> dependent_course
+    nodes = set([target_course_name])
+    unresolved = set()
+    alternatives = defaultdict(list)  # skill -> alternative course names
+    selected_for_skill = {}
+    recursion_stack = set()
+
+    def dfs(course_name: str) -> None:
+        if course_name in recursion_stack:
+            return
+
+        recursion_stack.add(course_name)
+        course = course_index.get(course_name)
+        if not course:
+            recursion_stack.discard(course_name)
+            return
+
+        prereq_skills = _infer_prereq_skills_for_course(course, prereq_cache)
+        for skill in prereq_skills:
+            if _is_skill_covered(skill, initial_skills):
+                continue
+
+            candidates = _get_candidate_courses_for_skill(
+                skill=skill,
+                skill_index=skill_index,
+                embeddings_data=embeddings_data,
+                course_index=course_index,
+                avoid_categories=avoid_categories,
+                criterion_name=criterion_name,
+                top_n=4,
+            )
+
+            # Avoid immediate self-dependency.
+            candidates = [name for name in candidates if name != course_name]
+
+            if not candidates:
+                unresolved.add(skill)
+                continue
+
+            selected = candidates[0]
+            selected_for_skill[skill] = selected
+            alternatives[skill] = candidates[1:3]
+
+            nodes.add(selected)
+            edges[selected].add(course_name)
+
+            if selected not in recursion_stack:
+                dfs(selected)
+
+        recursion_stack.discard(course_name)
+
+    dfs(target_course_name)
+
+    indegree = {node: 0 for node in nodes}
+    for parent, children in edges.items():
+        for child in children:
+            if child in indegree:
+                indegree[child] += 1
+
+    queue = deque(
+        sorted(
+            [node for node in nodes if indegree.get(node, 0) == 0],
+            key=lambda name: _score_course_for_criterion(course_index[name], criterion_name)
+        )
+    )
+
+    ordered_courses = []
+    while queue:
+        node = queue.popleft()
+        ordered_courses.append(node)
+        for child in sorted(edges.get(node, set())):
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                queue.append(child)
+
+    if len(ordered_courses) != len(nodes):
+        # If a cycle-like state appears, keep a deterministic fallback order.
+        ordered_courses = _sort_courses_by_criterion(list(nodes), course_index, criterion_name)
+
+    totals = {'duration': 0.0, 'cost': 0.0, 'difficulty': 0.0}
+    for name in ordered_courses:
+        metrics = _course_metrics(course_index[name])
+        totals['duration'] += metrics['duration_months']
+        totals['cost'] += metrics['cost_usd']
+        totals['difficulty'] += metrics['difficulty']
+
+    avg_difficulty = totals['difficulty'] / len(ordered_courses) if ordered_courses else 0.0
+
+    return {
+        'target_course': target_course_name,
+        'course_path': ordered_courses,
+        'path': ordered_courses,
+        'steps': ordered_courses,
+        'skill_to_selected_course': dict(selected_for_skill),
+        'skill_alternatives': dict(alternatives),
+        'unresolved_prerequisites': sorted(unresolved),
+        'metrics': {
+            'total_months': round(totals['duration'], 2),
+            'total_cost': round(totals['cost'], 2),
+            'avg_difficulty': round(avg_difficulty, 2),
+            'steps': len(ordered_courses),
+        },
     }
-    
-    if not path:
-        return metrics
-    
-    total_months = 0
-    total_cost = 0
-    difficulties = []
-    
-    for course_name in path:
-        course = courses_index.get(course_name, {})
-        total_months += course.get('duration_months', 0)
-        total_cost += course.get('cost_usd', 0)
-        difficulties.append(course.get('difficulty', 5))
-    
-    metrics['total_months'] = total_months
-    metrics['total_cost'] = total_cost
-    metrics['avg_difficulty'] = sum(difficulties) / len(difficulties) if difficulties else 0
-    
-    return metrics
 
 def generate_paths(
-    courses_list: List[Dict] = None,
-    skills: List[str] = None,
-    goal: str = None,
-    max_paths: int = 5,
-    avoid_categories: Set[str] = None,
-    user_prefs: Dict = None,
-    criteria_names: List[str] = None,
-    num_paths: int = None,
-    preferences: List[str] = None,
-    constraints: Dict = None
+    courses: List[Dict],
+    initial_skills: List[str],
+    objective: str,
+    max_paths: int = 3,
+    avoid_categories: Optional[Set[str]] = None,
+    user_prefs: Optional[Dict] = None,
+    criteria_names: Optional[List[str]] = None,
 ) -> List[Dict]:
-    """Generate multiple alternative career/learning pathways.
-    
-    Compatible with both direct calls and app.py interface.
-    Main entry point for path generation. Explores different optimization
-    criteria and returns a ranked list of pathways.
-    
-    Args:
-        courses_list: Optional pre-loaded list of courses (for compatibility)
-        skills: Existing skills of the user
-        goal: Target career/role (e.g., "Data Scientist", "ML Engineer")
-        max_paths: Maximum number of paths to generate
-        avoid_categories: Set of categories to avoid
-        user_prefs: User preferences dict
-        criteria_names: List of criterion names to use
-        num_paths: Alternative parameter for max_paths (legacy)
-        preferences: User preferences list
-        constraints: Dict with max_months, max_cost, max_difficulty, etc.
-    
-    Returns:
-        List of dicts with keys:
-        - criterion: "Fastest path", "Cheapest path", etc.
-        - path: List of course names (for UI)
-        - course_path: List of course objects
-        - steps: List of (milestone, course) tuples
-        - metrics: Dict with timing, cost, difficulty stats
-        - target_course: Target course (for UI compatibility)
+    """Generate complete learning pathways for a professional objective.
+
+    Flow:
+    1) Infer objective prerequisites.
+    2) Map prerequisites to courses (with alternatives).
+    3) Expand prerequisites recursively into a DAG.
+    4) Build multiple ranked pathways under optimization criteria.
     """
-    # Handle parameter compatibility
-    if num_paths is not None and max_paths == 5:
-        max_paths = num_paths
-    
-    if not constraints:
-        constraints = {}
-    if not skills:
-        skills = []
-    if not preferences:
-        preferences = []
-    if not avoid_categories:
-        avoid_categories = set()
-    if not user_prefs:
-        user_prefs = {}
-    if not criteria_names:
-        criteria_names = ['rapida', 'economica', 'balanceada']
-    
-    # Load data
-    if courses_list is None:
-        courses = load_courses()
-    else:
-        courses = courses_list
-    
     if not courses:
         return []
-    
-    courses_index = index_courses(courses)
-    skill_index = build_skill_index(courses)
-    category_index = build_category_index(courses)
-    prereq_graph = build_prerequisite_graph(courses, skill_index)
 
-    data_dir = Path(__file__).resolve().parent.parent / "data"
-    embedding_path = data_dir / "embedding.json"
-    try:
-        with open(embedding_path, 'r', encoding='utf-8') as f:
-            embeddings_data = json.load(f)
-    except Exception:
-        embeddings_data = []
-    
-    # Filter out courses from avoided categories
-    if avoid_categories:
-        courses_index = {
-            name: data 
-            for name, data in courses_index.items()
-            if (data.get('category', '').lower() not in {c.lower() for c in avoid_categories})
-        }
-    
-    # Find relevant courses (limited to avoid combinatorial explosion)
-    goal_courses = find_courses_by_goal(goal or '', courses, category_index, skill_index)
-    skill_courses = {
-        item.get('name', '').strip()
-        for skill in skills
-        for item in find_course_by_skill(skill, courses, skill_index, embeddings_data, top_n=100)
-        if item.get('name')
-    } if skills else set()
-    
-    # Limit goal courses to top candidates
-    if goal_courses:
-        # Rank by relevance (prefer courses with more skills + lower difficulty)
-        goal_list = sorted(
-            goal_courses,
-            key=lambda c: (
-                -len(courses_index.get(c, {}).get('skills', [])),
-                courses_index.get(c, {}).get('difficulty', 10)
+    initial_skills = initial_skills or []
+    user_prefs = user_prefs or {}
+    criteria = criteria_names or ['Fastest path', 'Cheapest path', 'Balanced path']
+    criteria = [item for item in criteria if _normalize_token(item)] or ['Balanced path']
+
+    course_index = index_courses(courses)
+    skill_index = build_skill_index(courses)
+    embeddings_data = _load_embeddings_data()
+
+    # Determine objective requirements and candidate target courses.
+    objective_requirements = _infer_prereq_skills_for_topic(objective, cache={})
+    objective_requirements = [
+        skill for skill in objective_requirements
+        if not _is_skill_covered(skill, initial_skills)
+    ]
+
+    target_candidates = _get_candidate_courses_for_skill(
+        skill=objective,
+        skill_index=skill_index,
+        embeddings_data=embeddings_data,
+        course_index=course_index,
+        avoid_categories=avoid_categories,
+        criterion_name='Balanced path',
+        top_n=max(6, max_paths * 2),
+    )
+
+    if not target_candidates:
+        return []
+
+    prereq_cache: Dict[str, List[str]] = {}
+    resolved_paths = []
+    seen_signatures = set()
+
+    for criterion in criteria:
+        ranked_targets = _sort_courses_by_criterion(target_candidates, course_index, criterion)
+        # Use several target alternatives to produce multiple complete routes.
+        for target_name in ranked_targets[:max(2, max_paths)]:
+            plan = _resolve_route_for_target_course(
+                target_course_name=target_name,
+                courses=courses,
+                course_index=course_index,
+                skill_index=skill_index,
+                embeddings_data=embeddings_data,
+                initial_skills=initial_skills,
+                criterion_name=criterion,
+                avoid_categories=avoid_categories,
+                prereq_cache=prereq_cache,
             )
-        )[:100]  # Limit to 100 goal courses
-        goal_courses = set(goal_list)
-    else:
-        goal_courses = skill_courses if skill_courses else set()
-    
-    if not goal_courses:
-        # Fallback: pick diverse courses from categories
-        for cat in list(category_index.keys())[:3]:
-            goal_courses.update(list(category_index[cat])[:10])
-        if not goal_courses:
-            goal_courses = set(list(courses_index.keys())[:20])
-    
-    # Map criteria names to optimization criteria
-    criteria_mapping = {
-        'rapida': 'fastest',
-        'economica': 'cheapest',
-        'balanceada': 'balanced',
-        'facil': 'easiest',
-        'premium': 'balanced'
-    }
-    
-    criteria_to_use = []
-    for name in (criteria_names or ['rapida', 'economica', 'balanceada']):
-        criterion = criteria_mapping.get(name.lower(), name.lower())
-        if criterion not in criteria_to_use:
-            criteria_to_use.append(criterion)
-    
-    # Ensure we have some criteria
-    if not criteria_to_use:
-        criteria_to_use = ['fastest', 'cheapest', 'balanced']
-    
-    # Generate paths under different criteria
-    generated_paths = []
-    seen_paths = set()
-    
-    for criterion in criteria_to_use:
-        path = _search_path_by_criterion(
-            start_courses=skill_courses,
-            goal_courses=goal_courses,
-            courses_index=courses_index,
-            prereq_graph=prereq_graph,
-            criterion=criterion,
-            constraints=constraints,
-            max_length=7,
-            max_candidates=200
-        )
-        
-        if path:
-            path_tuple = tuple(path)
-            if path_tuple not in seen_paths:
-                seen_paths.add(path_tuple)
-                metrics = _calculate_path_metrics(path, courses_index)
-                
-                # Create milestone steps
-                steps = []
-                for i, course_name in enumerate(path):
-                    course_data = courses_index.get(course_name, {})
-                    if i == 0:
-                        steps.append((f"Foundation: {course_name}", course_data))
-                    elif i == len(path) - 1:
-                        steps.append((f"Capstone: {course_name}", course_data))
-                    elif i == len(path) // 2:
-                        steps.append((f"Core: {course_name}", course_data))
-                    else:
-                        steps.append((f"Build: {course_name}", course_data))
-                
-                criterion_label = {
-                    'fastest': 'Fastest path',
-                    'cheapest': 'Cheapest path',
-                    'easiest': 'Easiest path',
-                    'balanced': 'Balanced path'
-                }.get(criterion, f'Path ({criterion})')
-                
-                generated_paths.append({
-                    'criterion': criterion_label,
-                    'path': path,
-                    'course_path': [courses_index.get(c, {}) for c in path],
-                    'steps': steps,
-                    'metrics': metrics,
-                    'target_course': goal or 'Career Path'
-                })
-    
-    # Sort by total time for better UX
-    generated_paths.sort(key=lambda p: p.get('metrics', {}).get('total_months', float('inf')))
-    
-    return generated_paths[:max_paths]
+
+            if not plan:
+                continue
+
+            signature = tuple(plan.get('path') or [])
+            if not signature or signature in seen_signatures:
+                continue
+
+            seen_signatures.add(signature)
+            plan['criterion'] = criterion
+            plan['objective'] = objective
+            plan['objective_prerequisites'] = objective_requirements
+            plan['user_prefs'] = user_prefs
+            resolved_paths.append(plan)
+
+            if len(resolved_paths) >= max_paths:
+                break
+
+        if len(resolved_paths) >= max_paths:
+            break
+
+    return resolved_paths
+

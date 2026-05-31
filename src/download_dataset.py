@@ -14,7 +14,7 @@ from typing import Optional  # Optional type hint helper
 import csv                # CSV parsing for source datasets
 import re                 # Provides regular expressions for pattern matching
 import json               # Handles JSON serialization and parsing
-from llm_adapter import build_prerequisite_graph, generate_embeddings # Functions for embeddings and prerequisite inference
+from llm_adapter import generate_embeddings # Functions for embeddings and prerequisite inference
 
 try:
     import kagglesdk.kaggle_env as kaggle_env # Import Kaggle environment utilities to check if running in Kaggle notebook

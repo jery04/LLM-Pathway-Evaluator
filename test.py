@@ -1,20 +1,17 @@
-from openai import OpenAI 
+from google import genai
 
-client = OpenAI(
-    api_key="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",
-    base_url="https://openrouter.ai/api/v1"
+client = genai.Client(
+    api_key="AQ.Ab8RN6LByPrhqnpqPPFaMiKRcAKJoO_D1CIh2IowDdYZk96p2g"
 )
 
-MODEL = "deepseek/deepseek-chat-v3-0324"
+MODEL = "gemini-2.5-flash"
 
 def ask_llm(prompt: str) -> str:
-    response = client.chat.completions.create(
+    response = client.models.generate_content(
         model=MODEL,
-        messages=[
-            {"role": "user", "content": prompt}
-        ]
+        contents=prompt
     )
 
-    return response.choices[0].message.content.strip()
+    return response.text.strip()
 
 print(ask_llm("What is the capital of France?"))
