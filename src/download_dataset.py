@@ -14,6 +14,7 @@ from typing import Optional  # Optional type hint helper
 import csv                # CSV parsing for source datasets
 import re                 # Provides regular expressions for pattern matching
 import json               # Handles JSON serialization and parsing
+from llm_adapter import build_prerequisite_graph, generate_embeddings # Functions for embeddings and prerequisite inference
 
 try:
     import kagglesdk.kaggle_env as kaggle_env # Import Kaggle environment utilities to check if running in Kaggle notebook
@@ -53,6 +54,10 @@ NAME_COLUMN_ALIASES = (
     "course name",
 )
 
+
+#--------------------------------------------------------------
+# METHODS 
+#--------------------------------------------------------------
 
 def _normalize_header(value: str) -> str:
     text = (value or "").strip().lower()
@@ -305,6 +310,9 @@ def _generate_normalized_cache(project_root: Path, data_dir: Path) -> Optional[P
         return None
 
 
+#--------------------------------------------------------------
+# MAIN 
+#--------------------------------------------------------------
 def main() -> None:
     """Main entry point to ensure dataset is available and cached.
 
@@ -328,10 +336,19 @@ def main() -> None:
     # the normalization step is a unit of work. Compute total steps
     # based on whether `kagglehub` is available. This stays constant
     # so percentages don't exceed 100% when skipping work.
+    # Compute total steps dynamically so progress reflects actual datasets.
+    csv_dir = data_dir / "csv"
+    csv_count = 0
+    if csv_dir.exists():
+        csv_count = sum(1 for _ in csv_dir.glob("dataset_*.csv"))
+
     if kagglehub:
-        total_steps = len(KAGGLE_DATASETS) + 1
+        # Count download attempts as max between configured datasets and existing CSVs,
+        # plus one normalization step.
+        total_steps = max(len(KAGGLE_DATASETS), csv_count) + 1
     else:
-        total_steps = 1
+        # No downloads; at least the normalization step counts as one.
+        total_steps = max(1, csv_count)
 
     def _print_progress(percent: int, message: str = "") -> None:
         bar_len = 40
@@ -354,7 +371,7 @@ def main() -> None:
     if csv_files_exist:
         # All dataset-download steps are considered already completed.
         completed = total_steps
-        _print_progress(100, f"processed {completed}/{total_steps} (CSV present, skipped downloads)")
+        _print_progress(100, f"processed {completed}/{total_steps}")
     elif kagglehub:
         for dataset_id in KAGGLE_DATASETS:
             try:
@@ -373,11 +390,15 @@ def main() -> None:
 
     # After copying raw data, attempt to generate a normalized cache file.
     _generate_normalized_cache(project_root, data_dir)
-    # Only increment if we haven't already marked all steps completed
+    # Only increment and print progress if we haven't already marked all steps completed
     if completed < total_steps:
         completed += 1
-    percent = int(completed / total_steps * 100)
-    _print_progress(percent, f"processed {completed}/{total_steps}")
+        percent = int(completed / total_steps * 100)
+        _print_progress(percent, f"processed {completed}/{total_steps}")
+
+    # Generate embeddings for course titles
+    print("\n\nGenerating embeddings for courses...")
+    generate_embeddings(data_dir)
 
     # Finalize
     _final_success_message()

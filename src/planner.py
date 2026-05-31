@@ -5,9 +5,19 @@ normalizers, prerequisite inference, indexing and search heuristics.
 """
 
 import json                        # Loads and dumps JSON data structures
+from difflib import SequenceMatcher  # String similarity for course-name ranking
 from pathlib import Path           # Object‑oriented filesystem path handling
 from typing import List, Dict, Set, Tuple, Optional   # Type hints for common container types
 from collections import defaultdict, deque  # Collections for graph data structures
+import math                        # Math functions for cosine similarity
+
+# Import LLM adapter for prerequisite inference and embeddings
+try:
+    from llm_adapter import infer_prerequisites_for_objective, get_text_embedding
+except ImportError:
+    # Fallback if import fails
+    infer_prerequisites_for_objective = None
+    get_text_embedding = None
 
 
 # =============================================================================
@@ -26,32 +36,17 @@ def load_courses() -> List[Dict]:
     - level: beginner/intermediate/advanced
     - skills: list of skills taught
     - link: course link (may be empty)
-    - prerequisites: list of prerequisite skills (inferred or explicit)
     """
-    data_dir = Path(__file__).resolve().parent.parent / "data"
-    json_path = data_dir / "normalized_courses.json"
-    
-    if not json_path.exists():
-        return []
-    
-    try:
-        with open(json_path, 'r', encoding='utf-8') as f:
-            courses = json.load(f)
-        if not isinstance(courses, list):
-            return []
+    json_path = (
+        Path(__file__).resolve().parent.parent
+        / "data"
+        / "normalized_courses.json"
+    )
 
-        # Keep only courses that can actually be referenced in the UI.
-        filtered = []
-        for course in courses:
-            if not isinstance(course, dict):
-                continue
-            link = str(course.get('link') or course.get('url') or course.get('href') or '').strip()
-            name = str(course.get('name') or course.get('nombre') or '').strip()
-            if name and link:
-                filtered.append(course)
-        return filtered
-    except Exception as e:
-        print(f"Error loading courses from {json_path}: {e}")
+    try:
+        with open(json_path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
         return []
 
 def index_courses(courses: List[Dict]) -> Dict[str, Dict]:
@@ -115,6 +110,99 @@ def build_category_index(courses: List[Dict]) -> Dict[str, Set[str]]:
     
     return dict(category_index)
 
+def _cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
+    """Calculate cosine similarity between two vectors.
+    
+    Returns a value between -1 and 1, where 1 means identical direction.
+    """
+    if not vec1 or not vec2 or len(vec1) != len(vec2):
+        return 0.0
+    
+    dot_product = sum(a * b for a, b in zip(vec1, vec2))
+    norm1 = math.sqrt(sum(a * a for a in vec1))
+    norm2 = math.sqrt(sum(b * b for b in vec2))
+    
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    
+    return dot_product / (norm1 * norm2)
+
+def find_course_by_skill(
+    skill: str,
+    courses: List[Dict],
+    skill_index: Dict[str, Set[str]],
+    embeddings_data: Optional[List[Dict]],
+    top_n: int = 3
+) -> List[Dict]:
+    """Find courses most similar to a given skill using embeddings.
+    
+    First checks the provided skill index and, if the skill exists there,
+    adds all matching courses ordered by course-name similarity to the skill.
+    Then it continues with the embedding-based search over embedding.json.
+    
+    Args:
+        skill: The skill or topic to search for
+        courses: Preloaded course list
+        skill_index: Precomputed skill -> courses index
+        embeddings_data: Preloaded embedding records from embedding.json
+        top_n: Number of top courses to return (default: 3)
+    
+    Returns:
+        List of course dictionaries with keys: name, similarity_score
+    """
+    
+    skill_normalized = (skill or '').strip().lower()
+    similarities = []
+    seen_courses = set()
+
+    if skill_normalized and skill_index.get(skill_normalized):
+        for course_name in skill_index[skill_normalized]:
+            course_name_normalized = (course_name or '').strip().lower()
+            if not course_name_normalized or course_name_normalized in seen_courses:
+                continue
+
+            similarity = _cosine_similarity(get_text_embedding(course_name.strip().lower()),get_text_embedding(skill_normalized))
+            similarities.append({
+                'name': course_name,
+                'similarity_score': similarity
+            })
+            seen_courses.add(course_name_normalized)
+
+    try:
+
+        if not embeddings_data:
+            return similarities
+        
+        # Generate embedding for the skill
+        skill_embedding = get_text_embedding(skill)
+        if not skill_embedding:
+            return similarities
+        
+        # Calculate similarity with all courses
+        for item in embeddings_data:
+            course_name = item.get('name', '')
+            course_name_normalized = (course_name or '').strip().lower()
+            course_embedding = item.get('embedding', [])
+            
+            if not course_name_normalized or course_name_normalized in seen_courses or not course_embedding:
+                continue
+            
+            # Calculate cosine similarity
+            similarity = _cosine_similarity(skill_embedding, course_embedding)
+            
+            similarities.append({
+                'name': course_name,
+                'similarity_score': similarity
+            })
+            seen_courses.add(course_name_normalized)
+        
+        similarities.sort(key=lambda x: x['similarity_score'], reverse=True)
+        return similarities[:top_n]
+    
+    except Exception as e:
+        print(f"Error finding courses by skill '{skill}': {e}")
+        return similarities
+
 
 # =============================================================================
 # PREREQUISITE INFERENCE & GRAPH BUILDING
@@ -124,56 +212,38 @@ def infer_prerequisites_for_course(
     course: Dict,
     all_courses: List[Dict],
     skill_index: Dict[str, Set[str]]
-) -> Set[str]:
-    """Infer prerequisite courses for a given course.
-    
-    A course is a prerequisite if it teaches foundational skills.
-    Optimized for performance on large catalogs.
-    """
-    prerequisites = set()
-    
-    # Explicit prerequisites field (if exists)
-    explicit_prereqs = course.get('prerequisites') or []
-    if isinstance(explicit_prereqs, str):
-        explicit_prereqs = [p.strip() for p in explicit_prereqs.split(',')]
-    for prereq in explicit_prereqs:
-        prereq_name = (prereq or '').strip()
-        if prereq_name:
-            prerequisites.add(prereq_name)
-    
-    # Quick check: only look for prerequisites for intermediate/advanced courses
-    my_level = (course.get('level') or 'Beginner').lower()
-    if 'beginner' in my_level:
-        return prerequisites
-    
-    my_difficulty = course.get('difficulty', 5)
-    
-    # Look for foundational skills (limited set)
-    foundational_patterns = [
-        'python', 'sql', 'statistics', 'linear algebra',
-        'data analysis', 'git'
-    ]
-    
-    for pattern in foundational_patterns:
-        if pattern in skill_index and len(prerequisites) < 5:
-            # Found courses teaching this foundational skill
-            courses_teaching = list(skill_index[pattern])[:10]  # Limit candidates
-            for course_name in courses_teaching:
-                # Simple heuristic: if name is shorter and not too hard, it's likely foundational
-                if len(course_name) < len(course.get('name', 'x')):
-                    prerequisites.add(course_name)
-    
-    return prerequisites
+) -> List[str]:
+    """Delegates to `infer_prerequisites_for_objective` and returns its result.
 
-def build_prerequisite_graph(courses: List[Dict]) -> Dict[str, Set[str]]:
-    """Build a prerequisite graph: course -> set of prerequisite courses.
+    Llama a la función LLM con el nombre del curso y devuelve la lista
+    resultante (o una lista vacía si la función no está disponible o falla).
+    """
+    if not infer_prerequisites_for_objective:
+        return []
+
+    try:
+        result = infer_prerequisites_for_objective((course.get('name') or '').strip())
+        # Normalizar a lista de strings (el adaptador devuelve List[str])
+        if not result:
+            return []
+        
+        return result
+    except Exception:
+        return []
+
+def build_prerequisite_graph(
+    courses: List[Dict],
+    skill_index: Optional[Dict[str, Set[str]]] = None
+) -> Dict[str, List[str]]:
+    """Build a prerequisite graph: course -> list of prerequisite courses.
     
-    Returns: {course_name -> {prerequisite_course_names}}
+    Returns: {course_name -> [prerequisite_course_names]}
     
     Optimized: only compute prerequisites for a subset of courses.
     """
-    skill_index = build_skill_index(courses)
-    prereq_graph = {}
+    if skill_index is None:
+        skill_index = build_skill_index(courses)
+    prereq_graph: Dict[str, List[str]] = {}
     
     # Only process courses with non-trivial difficulty (avoid 44k full iteration)
     for i, course in enumerate(courses):
@@ -191,29 +261,6 @@ def build_prerequisite_graph(courses: List[Dict]) -> Dict[str, Set[str]]:
 # =============================================================================
 # SEARCH HEURISTICS & PATH FINDING
 # =============================================================================
-
-def find_courses_by_skill(
-    skills: List[str],
-    courses: List[Dict],
-    skill_index: Dict[str, Set[str]]
-) -> Set[str]:
-    """Find all courses that teach or relate to the given skills.
-    
-    Returns a set of course names.
-    """
-    result = set()
-    
-    for skill in skills:
-        skill_normalized = (skill or '').lower().strip()
-        if skill_normalized in skill_index:
-            result.update(skill_index[skill_normalized])
-        else:
-            # Try partial match
-            for indexed_skill, courses_teaching in skill_index.items():
-                if skill_normalized in indexed_skill or indexed_skill in skill_normalized:
-                    result.update(courses_teaching)
-    
-    return result
 
 def find_courses_by_goal(
     goal: str,
@@ -249,7 +296,7 @@ def find_courses_by_goal(
 
 def _topological_sort_subset(
     courses_subset: Set[str],
-    prereq_graph: Dict[str, Set[str]]
+    prereq_graph: Dict[str, List[str]]
 ) -> List[str]:
     """Topological sort of courses respecting prerequisite constraints.
     
@@ -258,9 +305,9 @@ def _topological_sort_subset(
     """
     in_degree = {c: 0 for c in courses_subset}
     adj_list = {c: [] for c in courses_subset}
-    
+
     for course in courses_subset:
-        prereqs = prereq_graph.get(course) or set()
+        prereqs = prereq_graph.get(course) or []
         for prereq in prereqs:
             if prereq in courses_subset:
                 adj_list[prereq].append(course)
@@ -338,7 +385,7 @@ def _search_path_by_criterion(
     start_courses: Set[str],
     goal_courses: Set[str],
     courses_index: Dict[str, Dict],
-    prereq_graph: Dict[str, Set[str]],
+    prereq_graph: Dict[str, List[str]],
     criterion: str = 'balanced',
     constraints: Dict = None,
     max_length: int = 7,
@@ -375,7 +422,7 @@ def _search_path_by_criterion(
         candidates = set()
         
         # Add prerequisites (if any)
-        prereqs = prereq_graph.get(current_course, set())
+        prereqs = prereq_graph.get(current_course, [])
         if prereqs:
             candidates.update(list(prereqs)[:5])
         
@@ -566,7 +613,15 @@ def generate_paths(
     courses_index = index_courses(courses)
     skill_index = build_skill_index(courses)
     category_index = build_category_index(courses)
-    prereq_graph = build_prerequisite_graph(courses)
+    prereq_graph = build_prerequisite_graph(courses, skill_index)
+
+    data_dir = Path(__file__).resolve().parent.parent / "data"
+    embedding_path = data_dir / "embedding.json"
+    try:
+        with open(embedding_path, 'r', encoding='utf-8') as f:
+            embeddings_data = json.load(f)
+    except Exception:
+        embeddings_data = []
     
     # Filter out courses from avoided categories
     if avoid_categories:
@@ -578,7 +633,12 @@ def generate_paths(
     
     # Find relevant courses (limited to avoid combinatorial explosion)
     goal_courses = find_courses_by_goal(goal or '', courses, category_index, skill_index)
-    skill_courses = find_courses_by_skill(skills or [], courses, skill_index)
+    skill_courses = {
+        item.get('name', '').strip()
+        for skill in skills
+        for item in find_course_by_skill(skill, courses, skill_index, embeddings_data, top_n=100)
+        if item.get('name')
+    } if skills else set()
     
     # Limit goal courses to top candidates
     if goal_courses:

@@ -1,26 +1,20 @@
-from openai import OpenAI
+from openai import OpenAI 
 
-# Use environment variable for the API key to avoid embedding secrets in source.
 client = OpenAI(
-    api_key='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',
-    base_url='https://openrouter.ai/api/v1'
+    api_key="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",
+    base_url="https://openrouter.ai/api/v1"
 )
 
+MODEL = "deepseek/deepseek-chat-v3-0324"
 
-def ask_llm(prompt):
-
+def ask_llm(prompt: str) -> str:
     response = client.chat.completions.create(
-        model='deepseek/deepseek-chat',
+        model=MODEL,
         messages=[
-            {
-                'role': 'user',
-                'content': prompt
-            }
+            {"role": "user", "content": prompt}
         ]
     )
 
-    return response.choices[0].message.content
+    return response.choices[0].message.content.strip()
 
-
-#response = ask_llm('Say hello')
-#print(response)
+print(ask_llm("What is the capital of France?"))
