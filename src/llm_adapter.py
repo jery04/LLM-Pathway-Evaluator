@@ -168,6 +168,12 @@ def generate_embeddings(data_dir: Path) -> Optional[Path]:
     """Generate embeddings for all course titles and save to embedding.json."""
 
     try:
+        # If embeddings already exist, skip regeneration to avoid unnecessary API calls.
+        embedding_path = data_dir / "embedding.json"
+        if embedding_path.exists():
+            print(f"Skipping embeddings generation; {embedding_path.name} already exists.")
+            return embedding_path.resolve()
+
         import json
         import time
         from openai import OpenAI
@@ -330,10 +336,12 @@ def _call_prereq_llm(batch: List[str]) -> Dict[str, List[str]]:
 
     prompt = (
         "Return ONLY JSON.\n"
-        "Map each course to EXACTLY 3 prerequisites.\n"
+        "Values must be arrays containing 1 to 4 prerequisites.\n"
         "Rules:\n"
         "- keys must match input exactly\n"
-        "- values: array of 3 items\n"
+        "- values: array of 1 to 4 items\n"
+        "- Use 3-4 prerequisites only when genuinely necessary\n"
+        "- Avoid redundant or nearly identical prerequisites\n"
         "- no extra text\n\n"
         f"Courses:\n{courses_text}\n"
     )

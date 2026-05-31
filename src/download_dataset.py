@@ -345,7 +345,7 @@ def main() -> None:
     if kagglehub:
         # Count download attempts as max between configured datasets and existing CSVs,
         # plus one normalization step.
-        total_steps = max(len(KAGGLE_DATASETS), csv_count) + 1
+        total_steps = max(len(KAGGLE_DATASETS), csv_count)
     else:
         # No downloads; at least the normalization step counts as one.
         total_steps = max(1, csv_count)
@@ -396,7 +396,7 @@ def main() -> None:
         percent = int(completed / total_steps * 100)
         _print_progress(percent, f"processed {completed}/{total_steps}")
 
-    # Generate embeddings for course titles
+    # Generate embeddings only when the cache is missing.
     print("\n\nGenerating embeddings for courses...")
     generate_embeddings(data_dir)
 
