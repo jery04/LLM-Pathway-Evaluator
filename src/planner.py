@@ -263,12 +263,10 @@ def _course_metrics(course: Dict) -> Dict[str, float]:
 def _score_course_for_criterion(course: Dict, criterion_name: str) -> float:
     """Compute a scalar optimization score for a single course."""
     m = _course_metrics(course)
-    c = _normalize_token(criterion_name)
-
-    # Accept both original Spanish tokens and the new English labels.
-    if c in ('economica', 'cheapest path'):
+    # Criteria are handled strictly in English and compared by their original labels.
+    if criterion_name == 'Cheapest path':
         return m['cost_usd'] + 0.35 * m['duration_months'] + 0.2 * m['difficulty']
-    if c in ('rapida', 'fastest path'):
+    if criterion_name == 'Fastest path':
         return m['duration_months'] + 0.001 * m['cost_usd'] + 0.25 * m['difficulty']
 
     # Balanced: simple weighted combination for robust ranking.
@@ -321,12 +319,21 @@ def _is_skill_covered(skill: str, known_skills: List[str]) -> bool:
 
 def _passes_category_filter(
     course: Dict,
-    avoid_categories: List[str],
+    avoid_categories: Optional[List[str]],
     embeddings: Dict[str, List[float]]
 ) -> bool:
     """Reject courses whose embeddings are too close to avoided categories."""
 
     if not avoid_categories:
+        return True
+
+    normalized_avoid_categories = [
+        category
+        for category in (_normalize_token(item) for item in avoid_categories)
+        if category
+    ]
+
+    if not normalized_avoid_categories:
         return True
 
     course_name = (course.get("name") or "").strip()
@@ -337,11 +344,7 @@ def _passes_category_filter(
     if not course_embedding:
         return True
 
-    for category in avoid_categories:
-        category = _normalize_token(category)
-        if not category:
-            continue
-
+    for category in normalized_avoid_categories:
         category_embedding = get_text_embedding(category)
         if not category_embedding:
             continue
@@ -361,7 +364,7 @@ def _get_candidate_courses_for_skill(
     skill_index: Dict[str, Set[str]],
     embeddings_data: Optional[Dict[str, List[float]]],
     course_index: Dict[str, Dict],
-    avoid_categories: Optional[Set[str]],
+    avoid_categories: Optional[List[str]],
     criterion_name: str,
     top_n: int = 4,
 ) -> List[str]:
@@ -461,7 +464,7 @@ def _resolve_route_for_target_course(
     embeddings_data: Optional[Dict[str, List[float]]],
     initial_skills: List[str],
     criterion_name: str,
-    avoid_categories: Optional[Set[str]],
+    avoid_categories: Optional[List[str]],
     prereq_cache: Dict[str, List[str]],
 ) -> Dict:
     """Expand prerequisites recursively into a DAG and return a complete plan."""
@@ -577,7 +580,7 @@ def generate_paths(
     initial_skills: List[str],
     objective: str,
     max_paths: int = 3,
-    avoid_categories: Optional[Set[str]] = None,
+    avoid_categories: Optional[List[str]] = None,
     user_prefs: Optional[Dict] = None,
     criteria_names: Optional[List[str]] = None,
 ) -> List[Dict]:
@@ -595,7 +598,7 @@ def generate_paths(
     initial_skills = initial_skills or []
     user_prefs = user_prefs or {}
     criteria = criteria_names or ['Fastest path', 'Cheapest path', 'Balanced path']
-    criteria = [item for item in criteria if _normalize_token(item)] or ['Balanced path']
+    criteria = [item for item in criteria if item] or ['Balanced path']
 
     course_index = index_courses(courses)
     skill_index = build_skill_index(courses)

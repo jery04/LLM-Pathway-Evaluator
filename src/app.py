@@ -12,39 +12,9 @@ import importlib.util           # Utilities for loading modules dynamically
 import types                    # Provides dynamic type creation and inspection
 from html import escape         # Escapes HTML to prevent injection
 from urllib.parse import quote_plus   # URL‑encodes strings for safe query parameters
+from planner import index_courses, load_courses, generate_paths  # Local planner functions
+from llm_adapter import parse_input, explain_comparison, explain_paths_brief  # Local LLM adapter functions
 
-def _load_local_module(module_name: str, rel_path: str) -> types.ModuleType:
-    """Dynamically load a local Python module by relative path.
-
-    Ensures the app imports the repository's local modules instead of
-    similarly named installed packages (robust across environments).
-    """
-    # Resolve file path relative to this file's directory.
-    repo_root = Path(__file__).resolve().parent
-    file_path = repo_root / rel_path
-    # Create a module spec from the file location and execute it.
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-# Always load the local modules by file path to be robust across environments.
-_planner = _load_local_module('local_planner', 'planner.py')
-_llm = _load_local_module('local_llm_adapter', 'llm_adapter.py')
-
-# Expose key functions from the planner and LLM adapter
-load_courses = _planner.load_courses
-generate_paths = _planner.generate_paths
-parse_input = _llm.parse_input
-explain_comparison = _llm.explain_comparison
-
-def load_data():
-    """Load course data via the planner's loader.
-
-    This isolates the app from the planner implementation and keeps
-    downstream code using a single `load_data()` entry point.
-    """
-    return load_courses()
 
 def _merge_skill_lists(*skill_groups: List[str]) -> List[str]:
     """Merge skill lists while preserving order and removing duplicates."""
@@ -187,30 +157,18 @@ def main():
     )
 
     # Load course catalog and build quick lookup structures.
-    courses = load_data()
-    course_names = [c.get('name') for c in courses]
-    course_index = { c.get('name'): c for c in courses }
-
-    # Validate data load and inform the user if the source is missing.
-    if not course_names:
-        st.error('Could not load courses from local data or Kaggle. Check the data/ folder and Kaggle access if needed.')
-        return
+    courses = load_courses()
+    course_index = index_courses(courses)
 
     # Choose a sensible default selection for the skills multiselect UI.
     default_skills = ['python basics']
-    criterion_options = {
-        'Fastest path': 'rapida',
-        'Cheapest path': 'economica',
-        'Balanced path': 'balanceada',
-    }
-
     # Build a form to capture the user's goal, existing skills, and optimization criterion.
     with st.form('input_form'):
         user_text = st.text_area('Describe your goal and constraints (eg: "I want to learn data science while avoiding math")', height=120)
-        initial_skills = st.multiselect('Skills you already have', options=course_names, default=default_skills)
+        initial_skills = st.multiselect('Skills you already have', options=course_index.keys(), default=default_skills)
         selected_criterion = st.radio(
             'Optimization criteria',
-            options=list(criterion_options.keys()),
+            options=['Fastest path', 'Cheapest path', 'Balanced path'],
             index=0,
             horizontal=True,
             help='Each criterion produces a different path to compare time, cost, and difficulty.'
@@ -223,18 +181,10 @@ def main():
             st.info('No goal entered.')
             return
 
-        # Parse free-form user text into a structured profile (goal, preferences, skills).
-        goal, preferences, parser_skills = parse_input(user_text or '')
+        # Parse free-form user text into a structured profile (goal, preferences, skills, avoids).
+        goal, preferences, parser_skills, parser_avoids = parse_input(user_text or '')
         user_skills = _merge_skill_lists(initial_skills, parser_skills)
-        # Use the parsed goal if available; otherwise fall back to the raw user text.
-        goal = goal or (user_text.strip() if user_text and user_text.strip() else '')
-
-        # Convert the parsed preference list into planner-compatible arguments.
-        preference_text = ' | '.join(preferences).lower()
-        avoid_math = any(token in preference_text for token in ('avoid math', 'avoid maths', 'no math', 'no matem', 'sin matem', 'evitar matem'))
-        avoid_cats = {'Matemáticas'} if avoid_math else None
-
-        selected_criteria = [criterion_options[selected_criterion]] if selected_criterion in criterion_options else ['rapida']
+        selected_criteria = [selected_criterion] if selected_criterion else ['Fastest path']
 
         # Generate candidate paths using the planner. This may be CPU-bound.
         with st.spinner('Generating paths...'):
@@ -244,7 +194,7 @@ def main():
                 user_skills,
                 goal,
                 max_paths=max(1, len(selected_criteria)),
-                avoid_categories=avoid_cats,
+                avoid_categories=parser_avoids,
                 user_prefs={'knows_python': knows_python},
                 criteria_names=selected_criteria,
             )
@@ -258,7 +208,7 @@ def main():
             # Get brief explanations for each path from the LLM helper (optional).
             brief_explanations = []
             try:
-                brief_explanations = _llm.explain_paths_brief(paths)
+                brief_explanations = explain_paths_brief(paths)
             except Exception:
                 # If the LLM helper fails, the UI can still render the raw paths.
                 brief_explanations = []
@@ -282,7 +232,7 @@ def main():
             # Qualitative comparison generated by the LLM helper (long-form).
             st.subheader('Qualitative comparison (LLM)')
             try:
-                explanation = explain_comparison(paths, {'goal': goal, 'skills': user_skills, 'objective': goal, 'preferences': preferences})
+                explanation = explain_comparison(paths, {'goal': goal, 'skills': user_skills, 'objective': goal, 'preferences': preferences, 'avoids': parser_avoids})
             except Exception:
                 explanation = ''
             st.text_area('Explanation', value=explanation, height=240)
