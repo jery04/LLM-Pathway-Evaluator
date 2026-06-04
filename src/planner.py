@@ -6,9 +6,11 @@ normalizers, prerequisite inference, indexing and search heuristics.
 
 import json                        # Loads and dumps JSON data structures
 from pathlib import Path           # Object‑oriented filesystem path handling
-from typing import List, Dict, Set, Tuple, Optional   # Type hints for common container types
+from typing import List, Dict, Set, Optional   # Type hints for common container types
 from collections import defaultdict, deque  # Collections for graph data structures
 import math                        # Math functions for cosine similarity
+from dataclasses import dataclass, field
+
 
 # Import LLM adapter for prerequisite inference and embeddings
 try:
@@ -353,7 +355,7 @@ def _passes_category_filter(
             course_embedding,
             category_embedding
         )
-
+        print(category, course_name, similarity)
         if similarity >= CATEGORY_SIMILARITY_THRESHOLD:
             return False
 
@@ -456,213 +458,247 @@ def _infer_prereq_skills_for_course(
 
     return []
 
+
+# =========================
+# 1. ESTRUCTURA DEL ÁRBOL
+# =========================
+
+@dataclass
+class CourseNode:
+    name: str
+    skill: Optional[str] = None
+    alternatives: List[str] = field(default_factory=list)
+    unresolved: List[str] = field(default_factory=list)
+    children: List["CourseNode"] = field(default_factory=list)
+
+    @staticmethod
+    def flatten(node: "CourseNode") -> List[str]:
+        result = []
+        for child in node.children:
+            result.extend(CourseNode.flatten(child))
+        result.append(node.name)
+        return result
+    
+    @staticmethod
+    def print_tree(node: "CourseNode", indent: int = 0) -> None:
+        prefix = " " * (indent * 4)
+
+        # nodo principal
+        print(f"{prefix}📘 {node.name}")
+
+        # skill que satisface este nodo (si existe)
+        if node.skill:
+            print(f"{prefix}   🎯 skill: {node.skill}")
+
+        # alternativas
+        if node.alternatives:
+            print(f"{prefix}   🔁 alternatives: {node.alternatives}")
+
+        # skills no resueltas
+        if node.unresolved:
+            print(f"{prefix}   ⚠️ unresolved: {node.unresolved}")
+
+        # hijos
+        for child in node.children:
+            CourseNode.print_tree(child, indent + 1)
+
 def _resolve_route_for_target_course(
     target_course_name: str,
-    courses: List[Dict],
     course_index: Dict[str, Dict],
     skill_index: Dict[str, Set[str]],
-    embeddings_data: Optional[Dict[str, List[float]]],
+    embeddings_data,
     initial_skills: List[str],
     criterion_name: str,
     avoid_categories: Optional[List[str]],
     prereq_cache: Dict[str, List[str]],
-) -> Dict:
-    """Expand prerequisites recursively into a DAG and return a complete plan."""
-    if target_course_name not in course_index:
-        return {}
+    visited: Optional[Set[str]] = None,
+) -> Optional[CourseNode]:
 
-    edges = defaultdict(set)  # prereq_course -> dependent_course
-    nodes = set([target_course_name])
-    unresolved = set()
-    alternatives = defaultdict(list)  # skill -> alternative course names
-    selected_for_skill = {}
-    recursion_stack = set()
+    if visited is None:
+        visited = set()
 
-    def dfs(course_name: str) -> None:
-        if course_name in recursion_stack:
-            return
+    if target_course_name in visited:
+        return None
 
-        recursion_stack.add(course_name)
-        course = course_index.get(course_name)
-        if not course:
-            recursion_stack.discard(course_name)
-            return
+    course = course_index.get(target_course_name)
+    if not course:
+        return None
 
-        prereq_skills = _infer_prereq_skills_for_course(course, prereq_cache)
-        for skill in prereq_skills:
-            if _is_skill_covered(skill, initial_skills):
-                continue
+    visited.add(target_course_name)
 
-            candidates = _get_candidate_courses_for_skill(
-                skill=skill,
-                skill_index=skill_index,
-                embeddings_data=embeddings_data,
-                course_index=course_index,
-                avoid_categories=avoid_categories,
-                criterion_name=criterion_name,
-                top_n=4,
-            )
+    node = CourseNode(name=target_course_name)
 
-            # Avoid immediate self-dependency.
-            candidates = [name for name in candidates if name != course_name]
+    prereq_skills = _infer_prereq_skills_for_course(course, prereq_cache)
 
-            if not candidates:
-                unresolved.add(skill)
-                continue
+    if not prereq_skills:
+        return node
 
-            selected = candidates[0]
-            selected_for_skill[skill] = selected
-            alternatives[skill] = candidates[1:3]
+    for skill in prereq_skills:
 
-            nodes.add(selected)
-            edges[selected].add(course_name)
+        # si el usuario ya domina la skill
+        if _is_skill_covered(skill, initial_skills):
+            continue
 
-            if selected not in recursion_stack:
-                dfs(selected)
-
-        recursion_stack.discard(course_name)
-
-    dfs(target_course_name)
-
-    indegree = {node: 0 for node in nodes}
-    for parent, children in edges.items():
-        for child in children:
-            if child in indegree:
-                indegree[child] += 1
-
-    queue = deque(
-        sorted(
-            [node for node in nodes if indegree.get(node, 0) == 0],
-            key=lambda name: _score_course_for_criterion(course_index[name], criterion_name)
+        candidates = _get_candidate_courses_for_skill(
+            skill=skill,
+            skill_index=skill_index,
+            embeddings_data=embeddings_data,
+            course_index=course_index,
+            avoid_categories=avoid_categories,
+            criterion_name=criterion_name,
+            top_n=3,
         )
-    )
 
-    ordered_courses = []
-    while queue:
-        node = queue.popleft()
-        ordered_courses.append(node)
-        for child in sorted(edges.get(node, set())):
-            indegree[child] -= 1
-            if indegree[child] == 0:
-                queue.append(child)
+        if not candidates:
+            node.unresolved.append(skill)
+            continue
 
-    if len(ordered_courses) != len(nodes):
-        # If a cycle-like state appears, keep a deterministic fallback order.
-        ordered_courses = _sort_courses_by_criterion(list(nodes), course_index, criterion_name)
+        # guardamos alternativas (no usadas)
+        node.alternatives.extend(candidates[1:3])
 
-    totals = {'duration': 0.0, 'cost': 0.0, 'difficulty': 0.0}
-    for name in ordered_courses:
-        metrics = _course_metrics(course_index[name])
-        totals['duration'] += metrics['duration_months']
-        totals['cost'] += metrics['cost_usd']
-        totals['difficulty'] += metrics['difficulty']
+        best_course = candidates[0]
 
-    avg_difficulty = totals['difficulty'] / len(ordered_courses) if ordered_courses else 0.0
+        child = _resolve_route_for_target_course(
+            target_course_name=best_course,
+            course_index=course_index,
+            skill_index=skill_index,
+            embeddings_data=embeddings_data,
+            initial_skills=initial_skills,
+            criterion_name=criterion_name,
+            avoid_categories=avoid_categories,
+            prereq_cache=prereq_cache,
+            visited=visited,
+        )
 
-    return {
-        'target_course': target_course_name,
-        'course_path': ordered_courses,
-        'path': ordered_courses,
-        'steps': ordered_courses,
-        'skill_to_selected_course': dict(selected_for_skill),
-        'skill_alternatives': dict(alternatives),
-        'unresolved_prerequisites': sorted(unresolved),
-        'metrics': {
-            'total_months': round(totals['duration'], 2),
-            'total_cost': round(totals['cost'], 2),
-            'avg_difficulty': round(avg_difficulty, 2),
-            'steps': len(ordered_courses),
-        },
-    }
+        if child:
+            child.skill = skill
+            node.children.append(child)
+
+    return node
 
 def generate_paths(
     courses: List[Dict],
     initial_skills: List[str],
     objective: str,
-    max_paths: int = 3,
+    max_paths: int = 5,
     avoid_categories: Optional[List[str]] = None,
-    user_prefs: Optional[Dict] = None,
-    criteria_names: Optional[List[str]] = None,
+    user_prefs: Optional[List[str]] = None,
+    criterion_name: Optional[str] = None,
 ) -> List[Dict]:
-    """Generate complete learning pathways for a professional objective.
 
-    Flow:
-    1) Infer objective prerequisites.
-    2) Map prerequisites to courses (with alternatives).
-    3) Expand prerequisites recursively into a DAG.
-    4) Build multiple ranked pathways under optimization criteria.
-    """
     if not courses:
         return []
 
     initial_skills = initial_skills or []
-    user_prefs = user_prefs or {}
-    criteria = criteria_names or ['Fastest path', 'Cheapest path', 'Balanced path']
-    criteria = [item for item in criteria if item] or ['Balanced path']
+    user_prefs = user_prefs or []
 
+    criterion = criterion if criterion_name else 'Balanced path'
+    
     course_index = index_courses(courses)
     skill_index = build_skill_index(courses)
     embeddings_data = _load_embeddings_data()
 
-    # Determine objective requirements and candidate target courses.
-    objective_requirements = _infer_prereq_skills_for_topic(objective, cache={})
-    objective_requirements = [
-        skill for skill in objective_requirements
-        if not _is_skill_covered(skill, initial_skills)
-    ]
-
-    target_candidates = _get_candidate_courses_for_skill(
+    target_courses = _get_candidate_courses_for_skill(
         skill=objective,
         skill_index=skill_index,
         embeddings_data=embeddings_data,
         course_index=course_index,
         avoid_categories=avoid_categories,
-        criterion_name='Balanced path',
-        top_n=max(6, max_paths * 2),
+        criterion_name=criterion,
+        top_n=max_paths,
     )
 
-    if not target_candidates:
+    if not target_courses:
         return []
 
-    prereq_cache: Dict[str, List[str]] = {}
-    resolved_paths = []
-    seen_signatures = set()
+    plans = []
+    visited_global = set()
 
-    for criterion in criteria:
-        ranked_targets = _sort_courses_by_criterion(target_candidates, course_index, criterion)
-        # Use several target alternatives to produce multiple complete routes.
-        for target_name in ranked_targets[:max(2, max_paths)]:
-            plan = _resolve_route_for_target_course(
-                target_course_name=target_name,
-                courses=courses,
-                course_index=course_index,
-                skill_index=skill_index,
-                embeddings_data=embeddings_data,
-                initial_skills=initial_skills,
-                criterion_name=criterion,
-                avoid_categories=avoid_categories,
-                prereq_cache=prereq_cache,
-            )
+    for target in target_courses[:max_paths]:
 
-            if not plan:
-                continue
+        tree = _resolve_route_for_target_course(
+            target_course_name=target,
+            course_index=course_index,
+            skill_index=skill_index,
+            embeddings_data=embeddings_data,
+            initial_skills=initial_skills,
+            criterion_name=criterion,
+            avoid_categories=avoid_categories,
+            prereq_cache={},
+            visited=visited_global,
+        )
 
-            signature = tuple(plan.get('path') or [])
-            if not signature or signature in seen_signatures:
-                continue
+        if not tree:
+            continue
 
-            seen_signatures.add(signature)
-            plan['criterion'] = criterion
-            plan['objective'] = objective
-            plan['objective_prerequisites'] = objective_requirements
-            plan['user_prefs'] = user_prefs
-            resolved_paths.append(plan)
+        ordered_path = CourseNode.flatten(tree)
 
-            if len(resolved_paths) >= max_paths:
-                break
+        totals = {
+            "duration": 0.0,
+            "cost": 0.0,
+            "difficulty": 0.0
+        }
 
-        if len(resolved_paths) >= max_paths:
+        for name in ordered_path:
+            metrics = _course_metrics(course_index[name])
+            totals["duration"] += metrics["duration_months"]
+            totals["cost"] += metrics["cost_usd"]
+            totals["difficulty"] += metrics["difficulty"]
+
+        avg_difficulty = (
+            totals["difficulty"] / len(ordered_path)
+            if ordered_path
+            else 0.0
+        )
+
+        plans.append({
+            "target_course": target,
+            "course_path": ordered_path,
+            "path": ordered_path,
+            "steps": ordered_path,
+            "user_prefs": user_prefs,
+            "metrics": {
+                "total_months": round(totals["duration"], 2),
+                "total_cost": round(totals["cost"], 2),
+                "avg_difficulty": round(avg_difficulty, 2),
+                "steps": len(ordered_path),
+            },
+        })
+
+        if len(plans) >= max_paths:
             break
 
-    return resolved_paths
+    return plans
 
+
+
+# TEST
+if __name__ == "__main__":
+    # 1. Cargar todos los datos necesarios
+    courses = load_courses()
+    course_index = index_courses(courses)
+    skill_index = build_skill_index(courses)
+    embeddings_data = _load_embeddings_data()
+
+    print("\n" + "=" * 80)
+    print("TEST _passes_category_filter")
+    print("=" * 80)
+
+    avoid_categories = [
+        "computer science",
+        "Happiness"
+    ]
+
+    tested = 0
+
+    for course in courses[:5]:
+
+        result = _passes_category_filter(
+            course=course,
+            avoid_categories=avoid_categories,
+            embeddings=embeddings_data or {}
+        )
+        tested += 1
+
+        if tested >= 5:
+            break

@@ -184,19 +184,17 @@ def main():
         # Parse free-form user text into a structured profile (goal, preferences, skills, avoids).
         goal, preferences, parser_skills, parser_avoids = parse_input(user_text or '')
         user_skills = _merge_skill_lists(initial_skills, parser_skills)
-        selected_criteria = [selected_criterion] if selected_criterion else ['Fastest path']
 
         # Generate candidate paths using the planner. This may be CPU-bound.
         with st.spinner('Generating paths...'):
-            knows_python = any('python' in skill.lower() for skill in user_skills)
             paths = generate_paths(
                 courses,
                 user_skills,
                 goal,
-                max_paths=max(1, len(selected_criteria)),
+                max_paths=5,
                 avoid_categories=parser_avoids,
-                user_prefs={'knows_python': knows_python},
-                criteria_names=selected_criteria,
+                user_prefs=preferences,
+                criterion_name=selected_criterion,
             )
 
         # Show detected goal and skills to the user for transparency.
