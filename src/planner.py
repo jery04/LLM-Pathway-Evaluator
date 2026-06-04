@@ -680,25 +680,41 @@ if __name__ == "__main__":
     skill_index = build_skill_index(courses)
     embeddings_data = _load_embeddings_data()
 
-    print("\n" + "=" * 80)
-    print("TEST _passes_category_filter")
-    print("=" * 80)
-
-    avoid_categories = [
-        "computer science",
-        "Happiness"
+    # 2. Definir skills iniciales del usuario
+    initial_skills = [
+        "Python programming",
+        "Basic mathematics",
     ]
-
-    tested = 0
-
-    for course in courses[:5]:
-
-        result = _passes_category_filter(
-            course=course,
-            avoid_categories=avoid_categories,
-            embeddings=embeddings_data or {}
-        )
-        tested += 1
-
-        if tested >= 5:
-            break
+    
+    # 3. Seleccionar un curso objetivo (primer curso disponible como ejemplo)
+    target_course_name = "Machine Learning"
+    
+    # 4. Definir criterios de optimización
+    criterion_name = "Balanced path"  # Opciones: "Cheapest path", "Fastest path", "Balanced path"
+    
+    # 5. Categorías a evitar (opcional)
+    avoid_categories = []
+    
+    # 6. Cache para prerequisitos (inicialmente vacío)
+    prereq_cache = {}
+    
+    
+    # 7. Ejecutar el test con todos los parámetros
+    tree = _resolve_route_for_target_course(
+        target_course_name=target_course_name,
+        course_index=course_index,
+        skill_index=skill_index,
+        embeddings_data=embeddings_data,
+        initial_skills=initial_skills,
+        criterion_name=criterion_name,
+        avoid_categories=avoid_categories,
+        prereq_cache=prereq_cache,
+        visited=None  # El método crea uno si es None
+    )
+    
+    # 8. Imprimir el árbol de rutas
+    if tree:
+        print(f"\n✅ Árbol de ruta generado para: {target_course_name}\n")
+        CourseNode.print_tree(tree)
+    else:
+        print(f"\n❌ No se pudo generar ruta para: {target_course_name}")
