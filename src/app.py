@@ -12,7 +12,7 @@ import importlib.util           # Utilities for loading modules dynamically
 import types                    # Provides dynamic type creation and inspection
 from html import escape         # Escapes HTML to prevent injection
 from urllib.parse import quote_plus   # URL‑encodes strings for safe query parameters
-from planner import index_courses, load_courses, generate_paths  # Local planner functions
+from planner import index_courses, load_courses, generate_paths, build_skill_index  # Local planner functions
 from llm_adapter import parse_input, explain_comparison, explain_paths_brief  # Local LLM adapter functions
 
 
@@ -159,13 +159,16 @@ def main():
     # Load course catalog and build quick lookup structures.
     courses = load_courses()
     course_index = index_courses(courses)
+    # Build a skill index to populate the 'skills you already have' selector.
+    skill_index = build_skill_index(courses)
 
-    # Choose a sensible default selection for the skills multiselect UI.
-    default_skills = ['python basics']
+    # Choose sensible defaults that actually exist in the options.
+    requested_defaults = ['python basics']
+    default_skills = [s for s in requested_defaults if s in skill_index]
     # Build a form to capture the user's goal, existing skills, and optimization criterion.
     with st.form('input_form'):
         user_text = st.text_area('Describe your goal and constraints (eg: "I want to learn data science while avoiding math")', height=120)
-        initial_skills = st.multiselect('Skills you already have', options=course_index.keys(), default=default_skills)
+        initial_skills = st.multiselect('Skills you already have', options=sorted(skill_index.keys()), default=default_skills)
         selected_criterion = st.radio(
             'Optimization criteria',
             options=['Fastest path', 'Cheapest path', 'Balanced path'],

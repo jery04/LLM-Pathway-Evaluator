@@ -11,8 +11,8 @@ from collections import defaultdict, deque  # Collections for graph data structu
 import math                        # Math functions for cosine similarity
 from dataclasses import dataclass, field
 
-from sympy import python
-from torch import cat
+# Removed accidental/unused imports that cause runtime errors when
+# optional deps (sympy/torch) are not installed.
 
 
 # Import LLM adapter for prerequisite inference and embeddings
@@ -599,7 +599,7 @@ def generate_paths(
     initial_skills = initial_skills or []
     user_prefs = user_prefs or []
 
-    criterion = criterion if criterion_name else 'Balanced path'
+    criterion = criterion_name if criterion_name else 'Balanced path'
     
     course_index = index_courses(courses)
     skill_index = build_skill_index(courses)
@@ -680,12 +680,13 @@ def generate_paths(
 
 
 # TEST
-if __name__ == "__main__":
+def main():
     # 1. Cargar todos los datos necesarios
     courses = load_courses()
     course_index = index_courses(courses)
     skill_index = build_skill_index(courses)
     embeddings_data = _load_embeddings_data()
+
 
     # 2. Definir skills iniciales del usuario
     initial_skills = [
@@ -705,9 +706,20 @@ if __name__ == "__main__":
     # 6. Cache para prerequisitos (inicialmente vacío)
     prereq_cache = {}
     
+    
+    target_courses = _get_candidate_courses_for_skill(
+        skill=target_course_name,
+        skill_index=skill_index,
+        embeddings_data=embeddings_data,
+        course_index=course_index,
+        avoid_categories=avoid_categories,
+        criterion_name=criterion_name,
+        top_n=5,
+    )
+    
     # 7. Ejecutar el test con todos los parámetros
     tree = _resolve_route_for_target_course(
-        target_course_name=target_course_name,
+        target_course_name=target_courses[0],
         course_index=course_index,
         skill_index=skill_index,
         embeddings_data=embeddings_data,
@@ -724,3 +736,4 @@ if __name__ == "__main__":
         CourseNode.print_tree(tree)
     else:
         print(f"\n❌ No se pudo generar ruta para: {target_course_name}")
+               
