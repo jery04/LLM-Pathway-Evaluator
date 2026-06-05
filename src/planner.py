@@ -11,6 +11,9 @@ from collections import defaultdict, deque  # Collections for graph data structu
 import math                        # Math functions for cosine similarity
 from dataclasses import dataclass, field
 
+from sympy import python
+from torch import cat
+
 
 # Import LLM adapter for prerequisite inference and embeddings
 try:
@@ -20,8 +23,8 @@ except ImportError:
     infer_prerequisites_for_objective = None
     get_text_embedding = None
 
-SIMILARITY_THRESHOLD = 0.76
-CATEGORY_SIMILARITY_THRESHOLD = 0.82
+SIMILARITY_THRESHOLD = 0.72
+CATEGORY_SIMILARITY_THRESHOLD = 0.6
 
 # =============================================================================
 # DATA LOADING & NORMALIZATION
@@ -347,6 +350,10 @@ def _passes_category_filter(
         return True
 
     for category in normalized_avoid_categories:
+        
+        if category in _normalize_token(course_name):
+            return False
+        
         category_embedding = get_text_embedding(category)
         if not category_embedding:
             continue
@@ -355,7 +362,7 @@ def _passes_category_filter(
             course_embedding,
             category_embedding
         )
-        print(category, course_name, similarity)
+        
         if similarity >= CATEGORY_SIMILARITY_THRESHOLD:
             return False
 
@@ -697,7 +704,6 @@ if __name__ == "__main__":
     
     # 6. Cache para prerequisitos (inicialmente vacío)
     prereq_cache = {}
-    
     
     # 7. Ejecutar el test con todos los parámetros
     tree = _resolve_route_for_target_course(
