@@ -7,17 +7,119 @@ renders course links and generated learning paths.
 
 import streamlit as st          # Web UI framework for building interactive apps
 from typing import List         # Type hint for lists
-from pathlib import Path        # Object‑oriented filesystem paths
-import importlib.util           # Utilities for loading modules dynamically
-import types                    # Provides dynamic type creation and inspection
 from html import escape         # Escapes HTML to prevent injection
 from urllib.parse import quote_plus   # URL‑encodes strings for safe query parameters
-from planner import index_courses, load_courses, generate_paths, build_skill_index  # Local planner functions
-from llm_adapter import parse_input, explain_comparison, explain_paths_brief  # Local LLM adapter functions
 
+# Local planner functions & Local LLM adapter functions
+from planner import index_courses, load_courses, generate_paths, build_skill_index  
+from llm_adapter import parse_input, explain_comparison, explain_paths_brief  
+
+# A predefined list of skills to populate the multi-select input.
+PREDEFINED_SKILLS = [
+    # Programación General
+    'python', 'javascript', 'typescript', 'java', 'c++', 'c#', 'go', 'rust', 'php', 'ruby',
+    'kotlin', 'swift', 'r', 'matlab', 'scala', 'haskell', 'perl', 'lua', 'bash scripting',
+    'shell scripting', 'powershell', 'groovy', 'dart', 'elixir', 'erlang', 'clojure',
+    
+    # Frontend Development
+    'react', 'vue.js', 'angular', 'svelte', 'next.js', 'nuxt.js', 'gatsby', 'ember.js',
+    'html5', 'css3', 'sass', 'less', 'tailwind css', 'bootstrap', 'material design',
+    'web components', 'jquery', 'd3.js', 'three.js', 'babylon.js', 'webgl',
+    'vanilla javascript', 'webpack', 'vite', 'parcel', 'rollup', 'gulp', 'grunt',
+    
+    # Backend Development
+    'node.js', 'express', 'django', 'flask', 'fastapi', 'spring boot', 'spring mvc',
+    'asp.net', 'asp.net core', 'laravel', 'symfony', 'rails', 'sinatra', 'gin',
+    'echo', 'fasthttp', 'aiohttp', 'tornado', 'bottle', 'falcon', 'pyramid',
+    
+    # Bases de Datos
+    'sql', 'mysql', 'postgresql', 'mongodb', 'firebase', 'redis', 'elasticsearch',
+    'cassandra', 'dynamodb', 'oracle', 'sqlserver', 'mariadb', 'cockroachdb',
+    'neo4j', 'influxdb', 'timescaledb', 'couchdb', 'arangodb', 'datastore',
+    
+    # DevOps & Cloud
+    'docker', 'kubernetes', 'terraform', 'ansible', 'jenkins', 'gitlab ci', 'github actions',
+    'aws', 'azure', 'google cloud', 'heroku', 'netlify', 'vercel', 'cloudflare',
+    'ci/cd', 'containerization', 'orchestration', 'infrastructure as code', 'helm',
+    'vagrant', 'prometheus', 'grafana', 'elk stack', 'splunk', 'datadog', 'newrelic',
+    
+    # Testing & QA
+    'unit testing', 'integration testing', 'e2e testing', 'test automation', 'jest',
+    'mocha', 'chai', 'pytest', 'unittest', 'selenium', 'cypress', 'playwright',
+    'appium', 'jmeter', 'postman', 'insomnia', 'soap ui', 'loadrunner',
+    
+    # Diseño Web
+    'figma', 'adobe xd', 'sketch', 'protopie', 'framer', 'webflow', 'ui design',
+    'ux design', 'responsive design', 'wireframing', 'prototyping', 'user research',
+    'usability testing', 'accessibility', 'wcag', 'design systems', 'color theory',
+    'typography', 'layout design', 'information architecture', 'user journey mapping',
+    
+    # Diseño Digital & Gráfico
+    'adobe creative suite', 'photoshop', 'illustrator', 'indesign', 'premiere pro',
+    'after effects', 'lightroom', 'xd', 'affinity designer', 'corel draw', 'inkscape',
+    'blender', 'cinema 4d', '3d modeling', 'animation', 'motion graphics', 'video editing',
+    'color grading', 'graphic design', 'brand identity', 'logo design', 'packaging design',
+    
+    # Marketing Digital
+    'seo', 'sem', 'google ads', 'facebook ads', 'instagram ads', 'linkedin ads',
+    'content marketing', 'email marketing', 'affiliate marketing', 'growth hacking',
+    'conversion rate optimization', 'a/b testing', 'analytics', 'google analytics',
+    'mixpanel', 'amplitude', 'segment', 'social media marketing', 'influencer marketing',
+    'community management', 'pr', 'copywriting', 'brand strategy',
+    
+    # Mobile Development
+    'react native', 'flutter', 'ionic', 'xamarin', 'swiftui', 'jetpack compose',
+    'android development', 'ios development', 'mobile design', 'cross-platform development',
+    'progressive web apps', 'pwa', 'offline-first', 'mobile ux',
+    
+    # Data Science & Analytics
+    'machine learning', 'deep learning', 'tensorflow', 'pytorch', 'scikit-learn',
+    'pandas', 'numpy', 'data analysis', 'statistical analysis', 'data visualization',
+    'tableau', 'power bi', 'looker', 'qlik', 'apache spark', 'hadoop', 'hive',
+    'nlp', 'computer vision', 'predictive modeling', 'time series analysis',
+    'feature engineering', 'data wrangling', 'jupyter notebooks',
+    
+    # Arquitectura & Patrones
+    'microservices', 'monolith', 'rest api', 'graphql', 'websockets', 'grpc',
+    'message queues', 'event-driven architecture', 'cqrs', 'saga pattern',
+    'design patterns', 'solid principles', 'clean code', 'refactoring',
+    'scalability', 'performance optimization', 'caching strategies',
+    
+    # Seguridad
+    'cybersecurity', 'penetration testing', 'web security', 'owasp top 10',
+    'encryption', 'ssl/tls', 'oauth2', 'jwt', 'authentication', 'authorization',
+    'api security', 'secrets management', 'vulnerability assessment', 'security testing',
+    'ethical hacking', 'compliance', 'gdpr', 'pci dss', 'hipaa',
+    
+    # Soft Skills
+    'communication', 'problem solving', 'critical thinking', 'time management',
+    'project management', 'agile', 'scrum', 'kanban', 'leadership', 'teamwork',
+    'collaboration', 'adaptability', 'learning ability', 'creativity', 'innovation',
+    'public speaking', 'presentation skills', 'documentation', 'mentoring',
+    
+    # Tools & Platforms
+    'git', 'github', 'gitlab', 'bitbucket', 'jira', 'confluence', 'slack', 'notion',
+    'asana', 'monday.com', 'trello', 'linear', 'visual studio code', 'intellij idea',
+    'xcode', 'android studio', 'pycharm', 'jupyter', 'colab', 'vercel', 'netlify',
+    
+    # Otros Lenguajes & Tecnologías
+    'graphql', 'apollo', 'prisma', 'sequelize', 'typeorm', 'sqlalchemy',
+    'message brokers', 'rabbitmq', 'kafka', 'mqtt', 'nats', 'aws lambda',
+    'azure functions', 'google cloud functions', 'serverless', 'edge computing',
+    'blockchain', 'web3', 'solidity', 'ethereum', 'smart contracts',
+]
+
+
+# ===========================================================================
+# AUXILIARY METHODS
+# ===========================================================================
 
 def _merge_skill_lists(*skill_groups: List[str]) -> List[str]:
-    """Merge skill lists while preserving order and removing duplicates."""
+    """Merge multiple skill groups into a single ordered list while removing duplicates.
+
+    The function preserves the original order of the first occurrence of each skill and
+    deduplicates case-insensitively.
+    """
     merged = []
     seen = set()
 
@@ -32,10 +134,10 @@ def _merge_skill_lists(*skill_groups: List[str]) -> List[str]:
     return merged
 
 def _course_link(course: dict) -> str:
-    """Return a best-effort URL for a course dict.
+    """Return a best-effort URL for a course record.
 
-    Prefer explicit link fields; otherwise produce a platform-specific
-    search URL or a Google search if platform is unknown.
+    Prefer explicit link fields when present, fall back to a platform-specific
+    search page for known providers, and otherwise use a Google search.
     """
     # Check several common fields that might contain a direct link.
     link = str(course.get('link') or course.get('url') or course.get('href') or '').strip()
@@ -62,11 +164,10 @@ def _course_link(course: dict) -> str:
     return f'https://www.google.com/search?q={quote_plus(title)}'
 
 def _render_course_buttons(path: List[str], course_index: dict) -> None:
-    """Render HTML links for each course in the provided path list.
+    """Render styled HTML links for each course in the provided path.
 
-    Looks up course metadata in `course_index` and outputs a styled
-    block of anchor tags. Uses `unsafe_allow_html=True` intentionally
-    but escapes URL and label parts to avoid injection.
+    The function looks up course metadata, escapes the URL and label parts to
+    prevent injection, and renders anchor tags with the app's CSS styling.
     """
     # Gather course objects for the path and remove missing entries.
     courses = [course_index.get(name) for name in path]
@@ -87,11 +188,16 @@ def _render_course_buttons(path: List[str], course_index: dict) -> None:
     # Render the inline links using a styled container defined in the page CSS.
     st.markdown(f'<div class="course-links">{"".join(links)}</div>', unsafe_allow_html=True)
 
-def main():
-    """Main Streamlit app: layout, input handling, and path rendering.
 
-    Orchestrates loading data, parsing user input, generating candidate
-    paths, and showing qualitative LLM comparisons.
+# ===========================================================================
+# APP ORCHESTRATOR (MAIN)
+# ===========================================================================
+
+def main():
+    """Run the Streamlit app and coordinate UI, input, and path generation.
+
+    This function loads course data, collects user goals and skills, generates
+    candidate paths, and displays metrics plus optional LLM explanations.
     """
     
     st.set_page_config(page_title='Career Path Explorer')
@@ -163,12 +269,11 @@ def main():
     skill_index = build_skill_index(courses)
 
     # Choose sensible defaults that actually exist in the options.
-    requested_defaults = ['python basics']
-    default_skills = [s for s in requested_defaults if s in skill_index]
+    default_skills = 'python'
     # Build a form to capture the user's goal, existing skills, and optimization criterion.
     with st.form('input_form'):
         user_text = st.text_area('Describe your goal and constraints (eg: "I want to learn data science while avoiding math")', height=120)
-        initial_skills = st.multiselect('Skills you already have', options=sorted(skill_index.keys()), default=default_skills)
+        initial_skills = st.multiselect('Skills you already have', options=sorted(PREDEFINED_SKILLS), default=default_skills)
         selected_criterion = st.radio(
             'Optimization criteria',
             options=['Fastest path', 'Cheapest path', 'Balanced path'],
@@ -209,7 +314,7 @@ def main():
             # Get brief explanations for each path from the LLM helper (optional).
             brief_explanations = []
             try:
-                brief_explanations = explain_paths_brief(paths)
+                brief_explanations = explain_paths_brief(paths, goal)
             except Exception:
                 # If the LLM helper fails, the UI can still render the raw paths.
                 brief_explanations = []
@@ -233,11 +338,18 @@ def main():
             # Qualitative comparison generated by the LLM helper (long-form).
             st.subheader('Qualitative comparison (LLM)')
             try:
-                explanation = explain_comparison(paths, {'goal': goal, 'skills': user_skills, 'objective': goal, 'preferences': preferences, 'avoids': parser_avoids})
+                explanation = explain_comparison(
+                    paths,
+                    {
+                        'goal': goal,
+                        'skills': user_skills,
+                        'preferences': preferences,
+                        'avoids': parser_avoids,
+                    },
+                )
             except Exception:
                 explanation = ''
             st.text_area('Explanation', value=explanation, height=240)
-
 
 if __name__ == '__main__':
     main()

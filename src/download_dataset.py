@@ -55,14 +55,9 @@ NAME_COLUMN_ALIASES = (
 )
 
 
-#--------------------------------------------------------------
-# METHODS 
-#--------------------------------------------------------------
-
-def _normalize_header(value: str) -> str:
-    text = (value or "").strip().lower()
-    text = re.sub(r"[_-]+", " ", text)
-    return re.sub(r"\s+", " ", text)
+# ===========================================================================
+# AUXILIARY METHODS
+# ===========================================================================
 
 def _find_header(header_map: dict, aliases) -> Optional[str]:
     for alias in aliases:
@@ -76,6 +71,43 @@ def _first_value(row: dict, header_map: dict, aliases) -> str:
     if not header:
         return ""
     return (row.get(header) or "").strip()
+
+
+# ===========================================================================
+# PARSING AND NORMALIZATION METHODS
+# ===========================================================================
+
+def _normalize_header(value: str) -> str:
+    text = (value or "").strip().lower()
+    text = re.sub(r"[_-]+", " ", text)
+    return re.sub(r"\s+", " ", text)
+
+def _normalize_course_row(row: dict, header_map: dict) -> Optional[dict]:
+    link = _first_value(row, header_map, LINK_COLUMN_ALIASES)
+    if not link:
+        return None
+
+    name = _first_value(row, header_map, NAME_COLUMN_ALIASES)
+    if not name:
+        return None
+
+    duration_raw = _first_value(
+        row,
+        header_map,
+        ("duration", "course duration", "content_duration", "duration months", "duration_months"),
+    )
+    level_raw = _first_value(row, header_map, ("level", "difficulty level"))
+
+    return {
+        "name": name,
+        "duration_months": _parse_duration_to_months(duration_raw),
+        "difficulty": _parse_difficulty(row, header_map),
+        "category": _parse_category(row, header_map),
+        "cost_usd": _parse_cost(row, header_map),
+        "level": _parse_level(level_raw),
+        "skills": _parse_skills(row, header_map),
+        "link": link,
+    }
 
 def _parse_duration_to_months(value: str) -> int:
     text = (value or "").strip().lower()
@@ -176,32 +208,10 @@ def _parse_category(row: dict, header_map: dict) -> str:
             return value
     return "General"
 
-def _normalize_course_row(row: dict, header_map: dict) -> Optional[dict]:
-    link = _first_value(row, header_map, LINK_COLUMN_ALIASES)
-    if not link:
-        return None
 
-    name = _first_value(row, header_map, NAME_COLUMN_ALIASES)
-    if not name:
-        return None
-
-    duration_raw = _first_value(
-        row,
-        header_map,
-        ("duration", "course duration", "content_duration", "duration months", "duration_months"),
-    )
-    level_raw = _first_value(row, header_map, ("level", "difficulty level"))
-
-    return {
-        "name": name,
-        "duration_months": _parse_duration_to_months(duration_raw),
-        "difficulty": _parse_difficulty(row, header_map),
-        "category": _parse_category(row, header_map),
-        "cost_usd": _parse_cost(row, header_map),
-        "level": _parse_level(level_raw),
-        "skills": _parse_skills(row, header_map),
-        "link": link,
-    }
+# ===========================================================================
+# CACHE METHODS (JSON)
+# ===========================================================================
 
 def copy_dataset_to_data(source_dir: Path, target_dir: Path) -> None:
     """Copy dataset files from source_dir into target_dir.
@@ -310,9 +320,10 @@ def _generate_normalized_cache(project_root: Path, data_dir: Path) -> Optional[P
         return None
 
 
-#--------------------------------------------------------------
+# ===========================================================================
 # MAIN 
-#--------------------------------------------------------------
+# ===========================================================================
+
 def main() -> None:
     """Main entry point to ensure dataset is available and cached.
 
@@ -333,10 +344,6 @@ def main() -> None:
     )
 
     # Simple textual progress bar: each dataset download attempt plus
-    # the normalization step is a unit of work. Compute total steps
-    # based on whether `kagglehub` is available. This stays constant
-    # so percentages don't exceed 100% when skipping work.
-    # Compute total steps dynamically so progress reflects actual datasets.
     csv_dir = data_dir / "csv"
     csv_count = 0
     if csv_dir.exists():

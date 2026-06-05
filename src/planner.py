@@ -23,7 +23,7 @@ except ImportError:
     infer_prerequisites_for_objective = None
     get_text_embedding = None
 
-SIMILARITY_THRESHOLD = 0.72
+SIMILARITY_THRESHOLD = 0.75
 CATEGORY_SIMILARITY_THRESHOLD = 0.6
 
 # =============================================================================
