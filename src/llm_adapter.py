@@ -1,37 +1,44 @@
-"""Lightweight adapter for OpenAI-backed parsing and path explanations.
+"""Gemini adapter for user profiling, path explanations, and course embeddings.
 
-This module exposes helper functions to parse free-form user input into a
-structured profile and to explain/compare candidate learning paths.
+- Parse free text into structured learning preferences and skills.
+- Explain and compare candidate learning paths via LLM.
+- Infer prerequisites for any learning objective.
+- Generate spaCy embeddings (EN/ES) for course titles.
+
+Uses Google Gemini (gemini-2.5-flash-lite) and pre-loaded spaCy models.
 """
 
-import json
-import re   # Offers regular expressions for pattern matching and text parsing
-from typing import Dict, List, Tuple  # Type hints for dictionaries and lists
-from openai import OpenAI   # OpenAI client for interacting with the OpenAI API
-from pathlib import Path    # Path class for filesystem path manipulation
-from typing import Optional # Optional type hint helper
-from google import genai
-import time
-import spacy
-from scipy.spatial.distance import cosine
-import numpy as np
-import langdetect
-from langdetect import detect
+import json # JSON serialization/deserialization for cache and data exchange
+import re   # Regular expressions for parsing LLM responses
+from typing import Dict, List, Tuple  # Type hints for dictionaries, lists, and tuples
+from pathlib import Path     # Object-oriented filesystem path manipulation
+from typing import Optional  # Type hint for optional values (None or T)
+from google import genai     # Google Gemini API client for LLM interactions
+import time   # Performance measurement and progress tracking (used in generate_embeddings)
+import spacy  # NLP library for text embeddings and language detection fallback
+from langdetect import detect  # Language detection to choose spacy model (es/en)
 
-
+# Global Gemini client and model configuration
 client = genai.Client(
     api_key="AQ.Ab8RN6KQjo57zJ4VkQ57HYRV5tuEjAfUpwkCdBwd4Qki-0RAXw"
 )
 
+# Model choice - can be switched to a more advanced model if needed
 MODEL = "gemini-2.5-flash-lite"
 
+# Pre-load spaCy models for English and Spanish
+nlp_es = spacy.load('es_core_news_md')  # Spanish model
+nlp_en = spacy.load('en_core_web_md')   # English model
 
-# Cargar ambos modelos al inicio
-nlp_es = spacy.load('es_core_news_md')  # modelo en español
-nlp_en = spacy.load('en_core_web_md')   # modelo en inglés
 
-# Función para seleccionar el modelo según el idioma
+# ===========================================================================
+# LANGUAGE, MODEL PICKER & BASIC LLM INTERFACE
+# ===========================================================================
+
 def pick_model(texto):
+    """Select the appropriate spaCy language model based on detected text language.
+    This returns the Spanish model for Spanish text and the English model otherwise.
+    """
     try:
         idioma = detect(texto)
         if idioma == 'es':
@@ -39,10 +46,13 @@ def pick_model(texto):
         else:
             return nlp_en
     except:
-        print(f"⚠️ No se pudo detectar el idioma de '{texto}', usando modelo EN por defecto")
+        print(f"⚠️ Could not detect language of '{texto}', using EN model by default")
         return nlp_en
 
 def ask_llm(prompt: str) -> str:
+    """Send a prompt to the Gemini model and return the stripped text response.
+    The result is returned as plain text with leading and trailing whitespace removed.
+    """
     response = client.models.generate_content(
         model=MODEL,
         contents=prompt
@@ -51,14 +61,13 @@ def ask_llm(prompt: str) -> str:
     return response.text.strip()
 
 
-#--------------------------------------------------------------------
-# METHODS
-#--------------------------------------------------------------------
+# ===========================================================================
+# LLM PARSER & EXTRACTOR 
+# ===========================================================================
 
 def parse_input(text: str) -> Tuple[str, List[str], List[str], List[str]]:
-    """
-    Parse free-form user text and return:
-    (goal, preferences, skills, avoids)
+    """Parse a free-form learning request into goal, preferences, skills, and avoids.
+    The function returns a structured profile extracted from the user text.
     """
 
     prompt = f"""
@@ -91,7 +100,9 @@ def parse_input(text: str) -> Tuple[str, List[str], List[str], List[str]]:
     response = ask_llm(prompt) or ""
 
     def _extract_json_payload(raw_text: str) -> str:
-        """Extract a JSON object from fenced or plain model output."""
+        """Extract JSON text from model output whether fenced or plain.
+        The helper returns the first JSON object found in the response text.
+        """
         cleaned_text = raw_text.strip()
 
         fenced_match = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned_text, re.IGNORECASE | re.DOTALL)
@@ -134,7 +145,9 @@ def parse_input(text: str) -> Tuple[str, List[str], List[str], List[str]]:
         return "Not specified", [], [], []
 
 def explain_paths_brief(paths: List[Dict], goal: str = '') -> List[str]:
-    """Return a short LLM-written explanation for each path, including how it helps the user's goal."""
+    """Generate short LLM explanations for each candidate path in relation to the goal.
+    Each explanation links the path details to the stated learning objective.
+    """
     brief = []
 
     for i, p in enumerate(paths, 1):
@@ -161,7 +174,9 @@ def explain_paths_brief(paths: List[Dict], goal: str = '') -> List[str]:
     return brief
 
 def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
-    """Produce an LLM-written comparison and final recommendation."""
+    """Write an LLM comparison of candidate paths and return one brief recommendation.
+    The function summarizes differences and suggests the best path for the user.
+    """
     profile_parts = []
     if user_profile.get('goal'):
         profile_parts.append(f'goal: {user_profile.get("goal")}')
@@ -194,14 +209,14 @@ def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
     response = ask_llm(prompt)
     return (response or '').strip()
 
+
+# ===========================================================================
+# EMBEDDINGS GENERATION
+# ===========================================================================
+
 def get_text_embedding(text: str) -> Optional[List[float]]:
-    """Generate embedding for a single text using spaCy model based on language detection.
-    
-    Args:
-        text: The text to embed
-        
-    Returns:
-        List of floats representing the embedding, or None if it fails
+    """Generate a spaCy text embedding for a single input using language detection.
+    The embedding is produced by a model selected for the detected text language.
     """
     try:
         # Seleccionar el modelo según el idioma
@@ -216,7 +231,9 @@ def get_text_embedding(text: str) -> Optional[List[float]]:
         return None
 
 def generate_embeddings(data_dir: Path) -> Optional[Path]:
-    """Generate embeddings for all course titles using spaCy."""
+    """Create and save spaCy embeddings for course titles, skipping existing files.
+    The results are stored in embedding.json and reused if already present.
+    """
     
     embedding_path = data_dir / "embedding.json"
     
@@ -264,17 +281,14 @@ def generate_embeddings(data_dir: Path) -> Optional[Path]:
     
     return embedding_path
 
+
+# ===========================================================================
+# PREREQUISITE INFERENCE 
+# ===========================================================================
+
 def infer_prerequisites_for_objective(objective: str) -> List[str]:
-    """Infer prerequisites needed to learn a given objective or skill.
-    
-    Uses LLM to determine what foundational knowledge or skills are required
-    before tackling the specified objective.
-    
-    Args:
-        objective: The learning objective or skill to analyze (e.g., "Machine Learning", "Web Development")
-    
-    Returns:
-        List of prerequisites in English (e.g., ["Python", "Linear Algebra", "Statistics"])
+    """Use the LLM to infer whether a learning objective needs prior knowledge.
+    The function returns a short list of prerequisites if they are truly required.
     """
     
     prompt = (

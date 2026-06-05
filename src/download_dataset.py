@@ -1,11 +1,16 @@
-"""Utilities to fetch and prepare the course dataset for the project.
+"""Utilities to fetch, normalize, and cache multi-platform online course data.
 
-This module attempts to download a multi-platform online courses dataset
-from Kaggle (via `kagglehub` if available), copy files into the project's
-`data/` directory, and generate a normalized JSON cache used by the
-`planner` module to avoid repeated normalization work.
+This module downloads course datasets from Kaggle (via `kagglehub` if available),
+copies CSV files into the project's `data/csv/` directory, and generates a normalized
+JSON cache used downstream for embedding generation and course planning.
 
-All docstrings and comments are written in English per project convention.
+1. Download raw CSV datasets from configured Kaggle sources.
+2. Copy or extract CSV files into a local `data/csv/` folder.
+3. Normalize rows (duration, difficulty, cost, skills, category, level).
+4. Generate a JSON cache (`normalized_courses.json`) to avoid repeated normalization.
+5. Produce embeddings from the normalized cache via `llm_adapter.generate_embeddings`.
+
+All docstrings and comments follow the project convention (English).
 """
 
 from pathlib import Path  # Path class for filesystem path manipulation
@@ -29,7 +34,7 @@ except Exception:
     kagglehub = None
 
 
-# Kaggle dataset identifiers to download if `kagglehub` is available.
+# Kaggle dataset identifiers 
 KAGGLE_DATASETS = [
     "everydaycodings/multi-platform-online-courses-dataset",
     "mahmoudahmed6/skillshare-top-1000-course",
@@ -60,6 +65,9 @@ NAME_COLUMN_ALIASES = (
 # ===========================================================================
 
 def _find_header(header_map: dict, aliases) -> Optional[str]:
+    """Find the first matching header in a normalized header map using aliases.
+
+    Returns the canonical header name when an alias matches, or None if no match exists."""
     for alias in aliases:
         key = _normalize_header(alias)
         if key in header_map:
@@ -67,6 +75,9 @@ def _find_header(header_map: dict, aliases) -> Optional[str]:
     return None
 
 def _first_value(row: dict, header_map: dict, aliases) -> str:
+    """Return the first available value from a row using a set of header aliases.
+
+    It looks up the normalized header name and strips whitespace from the field value."""
     header = _find_header(header_map, aliases)
     if not header:
         return ""
@@ -78,11 +89,17 @@ def _first_value(row: dict, header_map: dict, aliases) -> str:
 # ===========================================================================
 
 def _normalize_header(value: str) -> str:
+    """Normalize a CSV header string for case-insensitive alias matching.
+
+    It lowercases the text, converts underscores and dashes to spaces, and collapses whitespace."""
     text = (value or "").strip().lower()
     text = re.sub(r"[_-]+", " ", text)
     return re.sub(r"\s+", " ", text)
 
 def _normalize_course_row(row: dict, header_map: dict) -> Optional[dict]:
+    """Convert a raw CSV row into the normalized course schema for caching.
+
+    Rows without a usable course link or course name are discarded as invalid."""
     link = _first_value(row, header_map, LINK_COLUMN_ALIASES)
     if not link:
         return None
@@ -110,10 +127,12 @@ def _normalize_course_row(row: dict, header_map: dict) -> Optional[dict]:
     }
 
 def _parse_duration_to_months(value: str) -> int:
+    """Parse a duration string and return an approximate duration in months.
+
+    Supports month phrases, hour estimates, and plain numeric values with a sensible default."""
     text = (value or "").strip().lower()
     if not text:
         return 1
-
     month_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:[-to]+\s*(\d+(?:[.,]\d+)?)\s*)?month", text)
     if month_match:
         first = float(month_match.group(1).replace(",", "."))
@@ -135,6 +154,9 @@ def _parse_duration_to_months(value: str) -> int:
     return 1
 
 def _parse_level(value: str) -> str:
+    """Normalize course level text into Beginner, Intermediate, or Advanced.
+
+    If no known level keyword is found, the original trimmed text is returned."""
     text = (value or "").strip().lower()
     if not text:
         return ""
@@ -147,6 +169,9 @@ def _parse_level(value: str) -> str:
     return value.strip()
 
 def _parse_difficulty(row: dict, header_map: dict) -> int:
+    """Infer a numeric difficulty score from row fields and rating descriptors.
+
+    Text clues map to a 1-10 scale, and numeric ratings are rounded into that range."""
     for key in ("difficulty level", "difficulty", "level", "rating", "course rating"):
         header = _find_header(header_map, (key,))
         if not header:
@@ -168,6 +193,9 @@ def _parse_difficulty(row: dict, header_map: dict) -> int:
     return 5
 
 def _parse_cost(row: dict, header_map: dict) -> int:
+    """Parse a cost field from the row and return a USD integer value.
+
+    Free values are converted to zero and numeric amounts are rounded."""
     for key in ("price", "cost", "cost usd", "price usd"):
         header = _find_header(header_map, (key,))
         if not header:
@@ -184,6 +212,9 @@ def _parse_cost(row: dict, header_map: dict) -> int:
     return 0
 
 def _parse_skills(row: dict, header_map: dict) -> list[str]:
+    """Extract skill terms from a skills field using common delimiters.
+
+    Non-string values are ignored and empty items are filtered out."""
     for key in ("skills", "associatedskills", "skill", "course skills"):
         header = _find_header(header_map, (key,))
         if not header:
@@ -199,6 +230,9 @@ def _parse_skills(row: dict, header_map: dict) -> list[str]:
     return []
 
 def _parse_category(row: dict, header_map: dict) -> str:
+    """Select a category value from the row using subject and topic aliases.
+
+    Returns 'General' when no category-like field is present."""
     for key in ("subject", "category", "topic", "field"):
         header = _find_header(header_map, (key,))
         if not header:
@@ -213,87 +247,68 @@ def _parse_category(row: dict, header_map: dict) -> str:
 # CACHE METHODS (JSON)
 # ===========================================================================
 
-def copy_dataset_to_data(source_dir: Path, target_dir: Path) -> None:
-    """Copy dataset files from source_dir into target_dir.
-    Merges directories and overwrites files when needed.
-    """
-    # Ensure the target directory exists before copying
-    target_dir.mkdir(parents=True, exist_ok=True)
+def _copy_downloaded_dataset_to_csv(source_path: Path, csv_dir: Path) -> None:
+    """Copy or extract CSV files from the Kaggle download into the project CSV folder.
 
-    # CSVs will be stored in a dedicated `csv/` subfolder under `target_dir`
-    csv_dir = target_dir / "csv"
+    This supports raw CSV files, Kaggle dataset directories, and ZIP archives that contain CSVs.
+    The files are renamed sequentially to avoid clashes in the `data/csv` folder."""
     csv_dir.mkdir(parents=True, exist_ok=True)
 
-    # Helper: compute next available dataset index (dataset_1.csv, dataset_2.csv, ...)
     def _next_dataset_index(dir_path: Path) -> int:
         pattern = re.compile(r"^dataset_(\d+)\.csv$", re.IGNORECASE)
         max_i = 0
-        if dir_path.exists():
-            for p in dir_path.iterdir():
-                if p.is_file():
-                    m = pattern.match(p.name)
-                    if m:
-                        try:
-                            max_i = max(max_i, int(m.group(1)))
-                        except Exception:
-                            continue
+        for p in dir_path.iterdir():
+            if p.is_file():
+                m = pattern.match(p.name)
+                if m:
+                    try:
+                        max_i = max(max_i, int(m.group(1)))
+                    except Exception:
+                        continue
         return max_i + 1
 
-    # Helper: rename any non-dataset_*.csv files under `base` recursively,
-    # starting at `start_index`. Returns the next available index after renames.
-    def _rename_csvs_in_dir(base: Path, start_index: int, out_dir: Path) -> int:
-        pattern = re.compile(r"^dataset_(\d+)\.csv$", re.IGNORECASE)
-        for p in sorted(base.rglob("*.csv")):
-            # Skip files that already match the dataset_N pattern (they may already be in out_dir)
-            if pattern.match(p.name) and p.parent == out_dir:
-                continue
-            # Determine target name in out_dir
-            dest = out_dir / f"dataset_{start_index}.csv"
-            while dest.exists():
-                start_index += 1
-                dest = out_dir / f"dataset_{start_index}.csv"
-            try:
-                p.replace(dest)
-            except Exception:
-                # Fallback to copy+unlink if rename across filesystems fails
-                shutil.copy2(p, dest)
-                try:
-                    p.unlink()
-                except Exception:
-                    pass
-            start_index += 1
-        return start_index
+    def _copy_csv_file(src_path: Path, index: int) -> int:
+        dest = csv_dir / f"dataset_{index}.csv"
+        while dest.exists():
+            index += 1
+            dest = csv_dir / f"dataset_{index}.csv"
+        shutil.copy2(src_path, dest)
+        return index + 1
 
-    # Start numbering from the next available index in the csv directory
     next_index = _next_dataset_index(csv_dir)
 
-    # Iterate over each top-level item in the downloaded dataset folder
-    for item in source_dir.iterdir():
-        destination = target_dir / item.name
+    if source_path.is_dir():
+        for csv_path in sorted(source_path.rglob("*.csv")):
+            next_index = _copy_csv_file(csv_path, next_index)
+        return
 
-        # If it's a directory, merge it into `target_dir` then move/rename CSVs into csv_dir
-        if item.is_dir():
-            shutil.copytree(item, destination, dirs_exist_ok=True)
-            next_index = _rename_csvs_in_dir(destination, next_index, csv_dir)
-        else:
-            # If it's a CSV file, copy it under a sequential dataset_i.csv name
-            if item.suffix.lower() == ".csv":
-                dest = csv_dir / f"dataset_{next_index}.csv"
-                while dest.exists():
-                    next_index += 1
-                    dest = csv_dir / f"dataset_{next_index}.csv"
-                shutil.copy2(item, dest)
-                next_index += 1
-            else:
-                # Preserve non-CSV files with original name
-                shutil.copy2(item, destination)
+    if source_path.is_file():
+        suffix = source_path.suffix.lower()
+        if suffix == ".csv":
+            _copy_csv_file(source_path, next_index)
+            return
 
-def _generate_normalized_cache(project_root: Path, data_dir: Path) -> Optional[Path]:
-    """Build normalized_courses.json only from CSVs that expose a link column.
+        if suffix == ".zip":
+            import zipfile
 
-    Only datasets whose header includes a link/url/course URL column are used.
-    Any row without a usable link is also discarded.
-    """
+            with zipfile.ZipFile(source_path, "r") as archive:
+                for member in sorted(archive.namelist()):
+                    if member.lower().endswith(".csv"):
+                        with archive.open(member) as src_handle:
+                            dest = csv_dir / f"dataset_{next_index}.csv"
+                            while dest.exists():
+                                next_index += 1
+                                dest = csv_dir / f"dataset_{next_index}.csv"
+                            with dest.open("wb") as out_handle:
+                                shutil.copyfileobj(src_handle, out_handle)
+                            next_index += 1
+            return
+
+def _generate_normalized_cache(data_dir: Path) -> Optional[Path]:
+    """Normalize course CSV datasets into a shared JSON cache used by the planner.
+
+    Only source files with a recognized course link column are converted, and rows
+    lacking a valid link are filtered out before cache generation."""
     try:
         transformed = []
         csv_dir = data_dir / "csv"
@@ -325,17 +340,14 @@ def _generate_normalized_cache(project_root: Path, data_dir: Path) -> Optional[P
 # ===========================================================================
 
 def main() -> None:
-    """Main entry point to ensure dataset is available and cached.
+    """Ensure course data is available locally, normalize it, and generate embeddings.
 
-    Steps performed:
-    1. Ensure the project's `data/` directory exists.
-    2. Check if CSV files already exist; if so, skip downloads.
-    3. Download any missing Kaggle datasets when `kagglehub` is available and CSVs are missing.
-    4. Copy downloaded files into `data/` (if download succeeded).
-    5. Rebuild the normalized JSON cache using `planner.py`.
+    1. Create data directory and check for existing CSVs.
+    2. Download missing Kaggle datasets into CSV folder.
+    3. Build normalized cache from raw CSV data.
+    4. Generate embeddings from normalized cache.
     """
-    project_root = Path(__file__).resolve().parents[1]
-    data_dir = project_root / "data"
+    data_dir = Path(__file__).resolve().parents[1] / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
 
     csv_dir = data_dir / "csv"
@@ -344,7 +356,6 @@ def main() -> None:
     )
 
     # Simple textual progress bar: each dataset download attempt plus
-    csv_dir = data_dir / "csv"
     csv_count = 0
     if csv_dir.exists():
         csv_count = sum(1 for _ in csv_dir.glob("dataset_*.csv"))
@@ -383,7 +394,7 @@ def main() -> None:
         for dataset_id in KAGGLE_DATASETS:
             try:
                 source_path = Path(kagglehub.dataset_download(dataset_id))
-                copy_dataset_to_data(source_path, data_dir)
+                _copy_downloaded_dataset_to_csv(source_path, csv_dir)
             except Exception:
                 pass
             if completed < total_steps:
@@ -396,7 +407,7 @@ def main() -> None:
         _print_progress(0, "no kagglehub")
 
     # After copying raw data, attempt to generate a normalized cache file.
-    _generate_normalized_cache(project_root, data_dir)
+    _generate_normalized_cache(data_dir)
     # Only increment and print progress if we haven't already marked all steps completed
     if completed < total_steps:
         completed += 1

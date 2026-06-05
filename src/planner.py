@@ -1,34 +1,91 @@
-"""planner.py
-Utilities for loading, normalizing and generating learning pathway
-plans from a catalog of online courses. Functions include loaders,
-normalizers, prerequisite inference, indexing and search heuristics.
+"""planner.py - Learning path generator from online course catalogs.
+
+This module builds optimized learning pathways using recursive prerequisite 
+resolution, embedding-based similarity matching, and multi-criteria scoring.
+
+Core capabilities:
+    - Load courses and embeddings from JSON files
+    - Build skill, category and course lookup indexes
+    - Infer prerequisite skills for courses via LLM
+    - Find courses that teach a given skill (embedding + lexical search)
+    - Score and rank courses by cost, duration and difficulty
+    - Generate recursive prerequisite trees with alternatives tracking
+    - Produce multiple ranked paths from initial skills to target objective
+
+Depends on llm_adapter for embeddings and prerequisite inference.
 """
 
-import json                        # Loads and dumps JSON data structures
-from pathlib import Path           # Object‑oriented filesystem path handling
+import json                 # Loads and dumps JSON data structures
+from pathlib import Path    # Object‑oriented filesystem path handling
 from typing import List, Dict, Set, Optional   # Type hints for common container types
-from collections import defaultdict, deque  # Collections for graph data structures
-import math                        # Math functions for cosine similarity
-from dataclasses import dataclass, field
-
-# Removed accidental/unused imports that cause runtime errors when
-# optional deps (sympy/torch) are not installed.
-
+from collections import defaultdict    # Collections for graph data structures (prerequisite DAG)
+import math     # Math functions for cosine similarity calculations
+from dataclasses import dataclass, field    # Defines structured data classes (CourseNode)
 
 # Import LLM adapter for prerequisite inference and embeddings
-try:
-    from llm_adapter import infer_prerequisites_for_objective, get_text_embedding
-except ImportError:
-    # Fallback if import fails
-    infer_prerequisites_for_objective = None
-    get_text_embedding = None
+from llm_adapter import infer_prerequisites_for_objective, get_text_embedding
 
+# Global thresholds for similarity-based matching
 SIMILARITY_THRESHOLD = 0.75
 CATEGORY_SIMILARITY_THRESHOLD = 0.6
 
+
 # =============================================================================
-# DATA LOADING & NORMALIZATION
+# COURSE HIERARCHY (TREE MODEL)
 # =============================================================================
+
+@dataclass
+class CourseNode:
+    """Node representing a course in the prerequisite tree.
+    Stores the course name, satisfied skill, alternatives, unresolved skills and children.
+    """
+    name: str
+    skill: Optional[str] = None
+    alternatives: List[str] = field(default_factory=list)
+    unresolved: List[str] = field(default_factory=list)
+    children: List["CourseNode"] = field(default_factory=list)
+
+    @staticmethod
+    def flatten(node: "CourseNode") -> List[str]:
+        """Return a post-order list of course names from the subtree.
+        Useful to produce an ordered linear learning path from a tree.
+        """
+        result = []
+        for child in node.children:
+            result.extend(CourseNode.flatten(child))
+        result.append(node.name)
+        return result
+    
+    @staticmethod
+    def print_tree(node: "CourseNode", indent: int = 0) -> None:
+        """Print a readable tree of the node and its descendants.
+        Shows course name, satisfied skill, alternatives and unresolved skills.
+        """
+        prefix = " " * (indent * 4)
+
+        # nodo principal
+        print(f"{prefix}📘 {node.name}")
+
+        # skill que satisface este nodo (si existe)
+        if node.skill:
+            print(f"{prefix}   🎯 skill: {node.skill}")
+
+        # alternativas
+        if node.alternatives:
+            print(f"{prefix}   🔁 alternatives: {node.alternatives}")
+
+        # skills no resueltas
+        if node.unresolved:
+            print(f"{prefix}   ⚠️ unresolved: {node.unresolved}")
+
+        # hijos
+        for child in node.children:
+            CourseNode.print_tree(child, indent + 1)
+
+
+# =====================================================================
+# DATA LOADING, EMBEDDING & INDEX BUILDING
+# =====================================================================
 
 def load_courses() -> List[Dict]:
     """Load courses from normalized_courses.json.
@@ -151,99 +208,9 @@ def build_category_index(courses: List[Dict]) -> Dict[str, Set[str]]:
     
     return dict(category_index)
 
-def _cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-    """Calculate cosine similarity between two vectors.
-    
-    Returns a value between -1 and 1, where 1 means identical direction.
-    """
-    if not vec1 or not vec2 or len(vec1) != len(vec2):
-        return 0.0
-    
-    dot_product = sum(a * b for a, b in zip(vec1, vec2))
-    norm1 = math.sqrt(sum(a * a for a in vec1))
-    norm2 = math.sqrt(sum(b * b for b in vec2))
-    
-    if norm1 == 0 or norm2 == 0:
-        return 0.0
-    
-    return dot_product / (norm1 * norm2)
-
-def find_course_by_skill(
-    skill: str,
-    skill_index: Dict[str, Set[str]],
-    embeddings_data: Optional[Dict[str, List[float]]],
-    top_n: int = 3
-) -> List[Dict]:
-    """Find courses most similar to a given skill using embeddings.
-    
-    First checks the provided skill index and, if the skill exists there,
-    adds all matching courses ordered by course-name similarity to the skill.
-    Then it continues with the embedding-based search over embedding.json.
-    
-    Args:
-        skill: The skill or topic to search for
-        courses: Preloaded course list
-        skill_index: Precomputed skill -> courses index
-        embeddings_data: Preloaded embeddings map: {course_name -> embedding}
-        top_n: Number of top courses to return (default: 3)
-    
-    Returns:
-        List of course dictionaries with keys: name, similarity_score
-    """
-    
-    skill_normalized = (skill or '').strip().lower()
-    similarities = []
-    seen_courses = set()
-
-    if skill_normalized and skill_index.get(skill_normalized):
-        for course_name in skill_index[skill_normalized]:
-            course_name_normalized = (course_name or '').strip().lower()
-            if not course_name_normalized or course_name_normalized in seen_courses:
-                continue
-
-            similarity = _cosine_similarity(get_text_embedding(course_name.strip().lower()),get_text_embedding(skill_normalized))
-            similarities.append({
-                'name': course_name,
-                'similarity_score': similarity
-            })
-            seen_courses.add(course_name_normalized)
-
-    try:
-
-        if not embeddings_data:
-            return similarities
-        
-        # Generate embedding for the skill
-        skill_embedding = get_text_embedding(skill)
-        if not skill_embedding:
-            return similarities
-        
-        # Calculate similarity with all courses
-        for course_name, course_embedding in embeddings_data.items():
-            course_name_normalized = (course_name or '').strip().lower()
-            
-            if not course_name_normalized or course_name_normalized in seen_courses or not course_embedding:
-                continue
-            
-            # Calculate cosine similarity
-            similarity = _cosine_similarity(skill_embedding, course_embedding)
-            
-            similarities.append({
-                'name': course_name,
-                'similarity_score': similarity
-            })
-            seen_courses.add(course_name_normalized)
-        
-        similarities.sort(key=lambda x: x['similarity_score'], reverse=True)
-        return similarities[:top_n]
-    
-    except Exception as e:
-        print(f"Error finding courses by skill '{skill}': {e}")
-        return similarities
-
 
 # =============================================================================
-# PATH PLANNING LOGIC (DAG WITH RECURSIVE PREREQUISITES AND ALTERNATIVES)
+# COURSE SCORING LOGIC (COST, DURATION & DIFFICULTY)
 # =============================================================================
 
 def _normalize_token(value: str) -> str:
@@ -287,6 +254,28 @@ def _sort_courses_by_criterion(
         [name for name in course_names if name in course_index],
         key=lambda name: _score_course_for_criterion(course_index[name], criterion_name),
     )
+
+
+# =============================================================================
+# UTILITIES: SIMILARITY, SKILL COVERAGE & CATEGORY FILTERS
+# =============================================================================
+
+def _cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
+    """Calculate cosine similarity between two vectors.
+    
+    Returns a value between -1 and 1, where 1 means identical direction.
+    """
+    if not vec1 or not vec2 or len(vec1) != len(vec2):
+        return 0.0
+    
+    dot_product = sum(a * b for a, b in zip(vec1, vec2))
+    norm1 = math.sqrt(sum(a * a for a in vec1))
+    norm2 = math.sqrt(sum(b * b for b in vec2))
+    
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    
+    return dot_product / (norm1 * norm2)
 
 def _is_skill_covered(skill: str, known_skills: List[str]) -> bool:
     """Return True if a skill is already covered by user-known skills."""
@@ -368,6 +357,84 @@ def _passes_category_filter(
 
     return True
 
+
+# =============================================================================
+# PREREQUISITE & COURSE RESOLVER
+# =============================================================================
+
+def find_course_by_skill(
+    skill: str,
+    skill_index: Dict[str, Set[str]],
+    embeddings_data: Optional[Dict[str, List[float]]],
+    top_n: int = 3
+) -> List[Dict]:
+    """Find courses most similar to a given skill using embeddings.
+    
+    First checks the provided skill index and, if the skill exists there,
+    adds all matching courses ordered by course-name similarity to the skill.
+    Then it continues with the embedding-based search over embedding.json.
+    
+    Args:
+        skill: The skill or topic to search for
+        courses: Preloaded course list
+        skill_index: Precomputed skill -> courses index
+        embeddings_data: Preloaded embeddings map: {course_name -> embedding}
+        top_n: Number of top courses to return (default: 3)
+    
+    Returns:
+        List of course dictionaries with keys: name, similarity_score
+    """
+    
+    skill_normalized = (skill or '').strip().lower()
+    similarities = []
+    seen_courses = set()
+
+    if skill_normalized and skill_index.get(skill_normalized):
+        for course_name in skill_index[skill_normalized]:
+            course_name_normalized = (course_name or '').strip().lower()
+            if not course_name_normalized or course_name_normalized in seen_courses:
+                continue
+
+            similarity = _cosine_similarity(get_text_embedding(course_name.strip().lower()),get_text_embedding(skill_normalized))
+            similarities.append({
+                'name': course_name,
+                'similarity_score': similarity
+            })
+            seen_courses.add(course_name_normalized)
+
+    try:
+
+        if not embeddings_data:
+            return similarities
+        
+        # Generate embedding for the skill
+        skill_embedding = get_text_embedding(skill)
+        if not skill_embedding:
+            return similarities
+        
+        # Calculate similarity with all courses
+        for course_name, course_embedding in embeddings_data.items():
+            course_name_normalized = (course_name or '').strip().lower()
+            
+            if not course_name_normalized or course_name_normalized in seen_courses or not course_embedding:
+                continue
+            
+            # Calculate cosine similarity
+            similarity = _cosine_similarity(skill_embedding, course_embedding)
+            
+            similarities.append({
+                'name': course_name,
+                'similarity_score': similarity
+            })
+            seen_courses.add(course_name_normalized)
+        
+        similarities.sort(key=lambda x: x['similarity_score'], reverse=True)
+        return similarities[:top_n]
+    
+    except Exception as e:
+        print(f"Error finding courses by skill '{skill}': {e}")
+        return similarities
+
 def _get_candidate_courses_for_skill(
     skill: str,
     skill_index: Dict[str, Set[str]],
@@ -417,10 +484,6 @@ def _infer_prereq_skills_for_topic(
     if normalized_topic in cache:
         return cache[normalized_topic]
 
-    if infer_prerequisites_for_objective is None:
-        cache[normalized_topic] = []
-        return []
-
     try:
         inferred = infer_prerequisites_for_objective(topic) or []
     except Exception:
@@ -466,48 +529,9 @@ def _infer_prereq_skills_for_course(
     return []
 
 
-# =========================
-# 1. ESTRUCTURA DEL ÁRBOL
-# =========================
-
-@dataclass
-class CourseNode:
-    name: str
-    skill: Optional[str] = None
-    alternatives: List[str] = field(default_factory=list)
-    unresolved: List[str] = field(default_factory=list)
-    children: List["CourseNode"] = field(default_factory=list)
-
-    @staticmethod
-    def flatten(node: "CourseNode") -> List[str]:
-        result = []
-        for child in node.children:
-            result.extend(CourseNode.flatten(child))
-        result.append(node.name)
-        return result
-    
-    @staticmethod
-    def print_tree(node: "CourseNode", indent: int = 0) -> None:
-        prefix = " " * (indent * 4)
-
-        # nodo principal
-        print(f"{prefix}📘 {node.name}")
-
-        # skill que satisface este nodo (si existe)
-        if node.skill:
-            print(f"{prefix}   🎯 skill: {node.skill}")
-
-        # alternativas
-        if node.alternatives:
-            print(f"{prefix}   🔁 alternatives: {node.alternatives}")
-
-        # skills no resueltas
-        if node.unresolved:
-            print(f"{prefix}   ⚠️ unresolved: {node.unresolved}")
-
-        # hijos
-        for child in node.children:
-            CourseNode.print_tree(child, indent + 1)
+# =============================================================================
+# PATH GENERATION (RECURSIVE PATH FINDER)
+# =============================================================================
 
 def _resolve_route_for_target_course(
     target_course_name: str,
@@ -520,6 +544,9 @@ def _resolve_route_for_target_course(
     prereq_cache: Dict[str, List[str]],
     visited: Optional[Set[str]] = None,
 ) -> Optional[CourseNode]:
+    """Recursively resolve prerequisites and build a CourseNode tree.
+    Detects cycles and returns None for missing or already visited courses.
+    """
 
     if visited is None:
         visited = set()
@@ -592,6 +619,9 @@ def generate_paths(
     user_prefs: Optional[List[str]] = None,
     criterion_name: Optional[str] = None,
 ) -> List[Dict]:
+    """Generate ranked learning paths from initial skills toward an objective.
+    Returns a list of plan dicts containing ordered steps and aggregated metrics.
+    """
 
     if not courses:
         return []
@@ -676,64 +706,3 @@ def generate_paths(
             break
 
     return plans
-
-
-
-# TEST
-def main():
-    # 1. Cargar todos los datos necesarios
-    courses = load_courses()
-    course_index = index_courses(courses)
-    skill_index = build_skill_index(courses)
-    embeddings_data = _load_embeddings_data()
-
-
-    # 2. Definir skills iniciales del usuario
-    initial_skills = [
-        "Python programming",
-        "Basic mathematics",
-    ]
-    
-    # 3. Seleccionar un curso objetivo (primer curso disponible como ejemplo)
-    target_course_name = "Machine Learning"
-    
-    # 4. Definir criterios de optimización
-    criterion_name = "Balanced path"  # Opciones: "Cheapest path", "Fastest path", "Balanced path"
-    
-    # 5. Categorías a evitar (opcional)
-    avoid_categories = []
-    
-    # 6. Cache para prerequisitos (inicialmente vacío)
-    prereq_cache = {}
-    
-    
-    target_courses = _get_candidate_courses_for_skill(
-        skill=target_course_name,
-        skill_index=skill_index,
-        embeddings_data=embeddings_data,
-        course_index=course_index,
-        avoid_categories=avoid_categories,
-        criterion_name=criterion_name,
-        top_n=5,
-    )
-    
-    # 7. Ejecutar el test con todos los parámetros
-    tree = _resolve_route_for_target_course(
-        target_course_name=target_courses[0],
-        course_index=course_index,
-        skill_index=skill_index,
-        embeddings_data=embeddings_data,
-        initial_skills=initial_skills,
-        criterion_name=criterion_name,
-        avoid_categories=avoid_categories,
-        prereq_cache=prereq_cache,
-        visited=None  # El método crea uno si es None
-    )
-    
-    # 8. Imprimir el árbol de rutas
-    if tree:
-        print(f"\n✅ Árbol de ruta generado para: {target_course_name}\n")
-        CourseNode.print_tree(tree)
-    else:
-        print(f"\n❌ No se pudo generar ruta para: {target_course_name}")
-               

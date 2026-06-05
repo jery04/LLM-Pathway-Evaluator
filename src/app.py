@@ -5,9 +5,9 @@ Streamlit interface. It handles dynamic local imports, form inputs, and
 renders course links and generated learning paths.
 """
 
-import streamlit as st          # Web UI framework for building interactive apps
-from typing import List         # Type hint for lists
-from html import escape         # Escapes HTML to prevent injection
+import streamlit as st      # Web UI framework for building interactive apps
+from typing import List     # Type hint for lists
+from html import escape     # Escapes HTML to prevent injection
 from urllib.parse import quote_plus   # URL‑encodes strings for safe query parameters
 
 # Local planner functions & Local LLM adapter functions
