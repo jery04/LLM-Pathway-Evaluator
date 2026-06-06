@@ -1,4 +1,10 @@
 streamlit
-networkx
+google-genai
+spacy
+langdetect
 kagglehub
-openai
+kagglesdk
+numpy
+scipy
+es-core-news-md
+en-core-web-md

@@ -1,123 +1,129 @@
-# Career Path Explorer AI
+# LLM Pathway Evaluator 🚀
 
-Prototipo para el proyecto "Exploración de trayectorias profesionales alternativas".
+**Custom Learning Path Generation for Online Course Catalogs**
 
-La app modela la búsqueda como un problema de planificación con restricciones y optimización: usa prerrequisitos entre cursos, genera trayectorias válidas bajo distintos criterios y pide a OpenAI una comparación cualitativa final.
+This system solves a constrained planning and optimization problem in the professional learning domain. Given a set of candidate decisions—courses, skills, certifications—it generates multiple valid learning pathways and evaluates them across technical metrics such as cost, duration, difficulty, and semantic alignment. The architecture uses a Large Language Model (LLM) as an analysis engine to compare, rank, and explain alternative progression strategies.
 
-La app trabaja con un catálogo mixto de cursos como `Coursera.csv`, `edx.csv`, `skillshare.csv` y `Udemy.csv`, y la comparación final del LLM sintetiza el mejor compromiso entre tiempo, costo y dificultad.
+## Overview 🔍
 
-Requisitos:
+The project converts normalized online course catalogs into structured learning trajectories. Using normalized course metadata and NLP embeddings, the system:
 
-- Python 3.10+
-- Instalar dependencias:
+- 📥 Extracts and normalizes online course information.
+- 🧠 Computes semantic embeddings and similarity scores.
+- 🛤️ Builds learning pathways that connect skills, objectives, and prerequisites.
+- 🌐 Presents results through a lightweight Streamlit web UI.
+
+The goal is to help learners, professionals, and teams identify the most appropriate sequence of courses based on goals and prior experience.
+
+## Project Structure 🗂️
+
+```
+LLM Pathway Evaluator/
+├── README.md                  # Project documentation
+├── requirements.txt           # Python dependencies
+├── data/
+│   ├── embedding.json         # Cached course embeddings
+│   ├── normalized_courses.json # Normalized course metadata
+│   └── csv/                   # Raw dataset CSV files
+│       ├── dataset_1.csv
+│       ├── dataset_2.csv
+│       └── ...
+├── src/
+│   ├── app.py                 # Streamlit UI for pathway exploration
+│   ├── download_dataset.py    # Kaggle dataset download and normalization
+│   ├── llm_adapter.py         # LLM / spaCy adapter for embeddings and explanations
+│   └── planner.py             # Path planning and course modeling logic
+└── test/
+    ├── test1.py               # Example tests and basic validations
+    ├── test2.py               # Gemini integration test scripts
+    ├── test3.py               # JSON and utility validation tests
+    └── test4.py               # spaCy, NumPy, and semantic similarity tests
+```
+
+## Installation 🛠️
+
+### Prerequisites 📌
+
+- Python 3.8+
+- pip
+- Internet access for dependency installation and spaCy model downloads
+
+### 1. Clone the repository 📂
 
 ```bash
-pip install -r requirements.txt
+git clone <REPOSITORY_URL>
+cd "LLM Pathway Evaluator"
 ```
 
-Ejecutar interfaz Streamlit:
+### 2. Create and activate a virtual environment 🧰
 
 ```bash
-streamlit run src/app.py
-```
-
-Para usar OpenAI, exporta:
-
-```powershell
-$env:OPENAI_API_KEY="tu_token"
-```
-
-Opcionalmente, puedes cambiar el modelo con:
-
-```powershell
-$env:OPENAI_MODEL="gpt-4o-mini"
-```
-
-## Cómo correr (paso a paso)
-
-Sigue estos pasos para crear el entorno virtual `.venv`, instalar dependencias y ejecutar la app. Los ejemplos incluyen PowerShell (Windows), CMD (Windows) y Bash (macOS/Linux).
-
-1) Crear el entorno virtual
-
-- PowerShell (Windows):
-
-```powershell
 python -m venv .venv
-```
-
-- CMD (Windows):
-
-```cmd
-python -m venv .venv
-```
-
-- Bash (macOS / Linux):
-
-```bash
-python3 -m venv .venv
-```
-
-2) Activar el entorno
-
-- PowerShell (Windows):
-
-```powershell
-# Si la política de ejecución impide ejecutar scripts, permite temporalmente los scripts para la sesión:
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force
 .\.venv\Scripts\Activate.ps1
 ```
 
-- CMD (Windows):
+If you use cmd:
 
 ```cmd
 .\.venv\Scripts\activate.bat
 ```
 
-- Bash (macOS / Linux):
+If you use Git Bash or WSL:
 
 ```bash
 source .venv/bin/activate
 ```
 
-3) Actualizar herramientas de empaquetado e instalar dependencias
+### 3. Install dependencies 📦
 
 ```bash
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
 ```
 
-Si ves un error tipo "ModuleNotFoundError: No module named 'pip._internal.cli'", repara pip así (desde el intérprete del `.venv`):
+### 4. Prepare dataset files 📁
 
-```powershell
-& '.venv\Scripts\python.exe' -m ensurepip --upgrade --default-pip
-& '.venv\Scripts\python.exe' -m pip install --upgrade pip setuptools wheel
+Verify the presence of the following data artifacts:
+
+- `data/normalized_courses.json`
+- `data/embedding.json`
+- `data/csv/*.csv`
+
+If the files are missing, regenerate them with:
+
+```bash
+python src/download_dataset.py
 ```
 
-4) Ejecutar la aplicación
-
-Tras activar el entorno, ejecuta (ejemplo con Streamlit):
+### 5. Launch the web UI 🚀
 
 ```bash
 streamlit run src/app.py
 ```
 
-O usando el intérprete del `.venv` directamente en Windows:
+## Key Dependencies 📘
 
-```powershell
-& '.venv\Scripts\python.exe' -m streamlit run src/app.py
-```
+- `streamlit`: interactive web UI for pathway visualization
+- `google-genai`: Google Gemini client for LLM text generation
+- `spacy`: NLP pipeline and embeddings
+- `langdetect`: automatic language detection for spaCy model selection
+- `kagglehub` / `kagglesdk`: Kaggle dataset download support
+- `numpy` / `scipy`: numerical computation and vector similarity
 
-5) Variables de entorno útiles
+## Example Output 🎯
 
-- `OPENAI_API_KEY`: clave para la API de OpenAI.
-- `OPENAI_MODEL`: modelo a usar, por defecto `gpt-4o-mini`.
+A typical generated pathway might look like this:
 
-Ejemplo (PowerShell):
+- Target: Learn machine learning with Python
+- Proposed pathway:
+  1. Course: Python Fundamentals
+  2. Course: Statistics for Data Science
+  3. Course: Machine Learning with scikit-learn
+  4. Course: Data Analysis Project
 
-```powershell
-$env:OPENAI_API_KEY = "tu_token"
-```
+> The engine builds a coherent progression based on semantic relationships among courses, skills, and learning objectives.
 
-Notas:
-- Este repositorio está testeado en Windows; los comandos de Bash sirven para macOS/Linux.
-- Si quieres que haga la limpieza del paquete corrupto que genera la advertencia "Ignoring invalid distribution ~ip", dímelo y lo borro del directorio `.venv\Lib\site-packages`.
+---
+
+Built with ❤️ by a human 
+
+
