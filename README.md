@@ -33,11 +33,7 @@ LLM Pathway Evaluator/
 │   ├── download_dataset.py    # Kaggle dataset download and normalization
 │   ├── llm_adapter.py         # LLM / spaCy adapter for embeddings and explanations
 │   └── planner.py             # Path planning and course modeling logic
-└── test/
-    ├── test1.py               # Example tests and basic validations
-    ├── test2.py               # Gemini integration test scripts
-    ├── test3.py               # JSON and utility validation tests
-    └── test4.py               # spaCy, NumPy, and semantic similarity tests
+│
 ```
 
 ## Installation 🛠️
@@ -51,7 +47,7 @@ LLM Pathway Evaluator/
 ### 1. Clone the repository 📂
 
 ```bash
-git clone <REPOSITORY_URL>
+git clone https://github.com/jery04/LLM-Pathway-Evaluator.git
 cd "LLM Pathway Evaluator"
 ```
 
@@ -94,7 +90,7 @@ If the files are missing, regenerate them with:
 python src/download_dataset.py
 ```
 
-### 5. Launch the web UI 🚀
+### 5. Launch the web UI (inside the created environment) 🚀
 
 ```bash
 streamlit run src/app.py
