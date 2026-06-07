@@ -8,3 +8,4 @@ numpy
 scipy
 es-core-news-md
 en-core-web-md
+python-dotenv

@@ -8,6 +8,8 @@
 Uses Google Gemini (gemini-2.5-flash-lite) and pre-loaded spaCy models.
 """
 
+from dotenv import load_dotenv # Load environment variables from .env file for API keys and config
+import os   # Operating system interactions for file paths and environment variables
 import json # JSON serialization/deserialization for cache and data exchange
 import re   # Regular expressions for parsing LLM responses
 from typing import Dict, List, Tuple  # Type hints for dictionaries, lists, and tuples
@@ -18,10 +20,11 @@ import time   # Performance measurement and progress tracking (used in generate_
 import spacy  # NLP library for text embeddings and language detection fallback
 from langdetect import detect  # Language detection to choose spacy model (es/en)
 
+load_dotenv()  # Load variables from the .env file
+
 # Global Gemini client and model configuration
-client = genai.Client(
-    api_key="AQ.Ab8RN6KQjo57zJ4VkQ57HYRV5tuEjAfUpwkCdBwd4Qki-0RAXw"
-)
+api_key = os.getenv("GEMINI_API_KEY")
+client = genai.Client(api_key=api_key)
 
 # Model choice - can be switched to a more advanced model if needed
 MODEL = "gemini-2.5-flash-lite"
