@@ -90,7 +90,42 @@ If the files are missing, regenerate them with:
 python src/download_dataset.py
 ```
 
-### 5. Launch the web UI (inside the created environment) 🚀
+### 5. Create a `.env` file and obtain an API key 🔑
+
+Before launching the web UI, create a `.env` file in the project root containing your Gemini API key:
+
+```text
+GEMINI_API_KEY=YOUR_API_KEY_HERE
+```
+
+How to create the `.env` file from the terminal:
+
+- PowerShell (Windows):
+
+```powershell
+echo "GEMINI_API_KEY=YOUR_API_KEY_HERE" > .env
+```
+
+- Bash (Linux / macOS / Git Bash):
+
+```bash
+echo "GEMINI_API_KEY=YOUR_API_KEY_HERE" > .env
+```
+
+Step-by-step: how to obtain a Gemini API key (Google Generative AI):
+
+1. 🌐 Open https://console.cloud.google.com/ and sign in with your Google account.
+2. 📁 Create a new project or select an existing project using the project selector (top-left).
+3. ⚙️ Go to "APIs & Services" → "Library" and search for "Generative AI" or "Generative AI API"; click "Enable" if it is not already enabled.
+4. 🔑 Go to "APIs & Services" → "Credentials" → "Create credentials" → "API key".
+5. 📋 Copy the newly created API key and paste it into the `.env` file as `GEMINI_API_KEY=YOUR_API_KEY_HERE`.
+6. 🛡️ (Optional but recommended) In the Credentials section, restrict the API key by IP address, HTTP referrer, or API usage to improve security.
+
+> Note: If you use Generative AI Studio (https://console.generativeai.google), the interface and flow may differ slightly; look for "Credentials" or "API keys" in that interface.
+
+### 6. Launch the web UI (inside the created environment) 🚀
+
+After creating the `.env` file with your API key, run the following command (inside the activated virtual environment):
 
 ```bash
 streamlit run src/app.py
@@ -98,12 +133,18 @@ streamlit run src/app.py
 
 ## Key Dependencies 📘
 
-- `streamlit`: interactive web UI for pathway visualization
-- `google-genai`: Google Gemini client for LLM text generation
-- `spacy`: NLP pipeline and embeddings
-- `langdetect`: automatic language detection for spaCy model selection
-- `kagglehub` / `kagglesdk`: Kaggle dataset download support
-- `numpy` / `scipy`: numerical computation and vector similarity
+### Core Libraries
+- `streamlit`: interactive web UI for career path generation and visualization
+- `google-genai`: Google Gemini client for LLM-powered explanations
+- `spacy`: NLP processing and skill extraction
+- `langdetect`: automatic language detection
+- `kagglehub` / `kagglesdk`: Kaggle dataset integration
+- `numpy` / `scipy`: numerical computation and similarity calculations
+- `python-dotenv`: environment variable management
+
+### NLP Models
+- `en-core-web-md`: English spaCy model
+- `es-core-news-md`: Spanish spaCy model
 
 ## Example Output 🎯
 

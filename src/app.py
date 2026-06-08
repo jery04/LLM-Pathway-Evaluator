@@ -164,30 +164,59 @@ def _course_link(course: dict) -> str:
     return f'https://www.google.com/search?q={quote_plus(title)}'
 
 def _render_course_buttons(path: List[str], course_index: dict) -> None:
-    """Render styled HTML links for each course in the provided path.
-
-    The function looks up course metadata, escapes the URL and label parts to
-    prevent injection, and renders anchor tags with the app's CSS styling.
-    """
-    # Gather course objects for the path and remove missing entries.
+    """Render styled HTML links for each course in the provided path."""
+    
     courses = [course_index.get(name) for name in path]
     courses = [course for course in courses if course]
+
     if not courses:
         return
 
     links = []
+
     for course in courses:
-        # Prefer English `name`, fall back to Spanish `nombre`.
-        label = str(course.get('name') or course.get('nombre') or 'Open course')
-        link = _course_link(course)
-        # Escape both URL and label to avoid HTML injection attacks.
-        links.append(
-            f'<a class="course-link-word" href="{escape(link, quote=True)}" target="_blank" rel="noopener noreferrer">{escape(label)}</a>'
+        label = str(
+            course.get("name")
+            or course.get("nombre")
+            or "Open course"
         )
 
-    # Render the inline links using a styled container defined in the page CSS.
-    st.markdown(f'<div class="course-links">{"".join(links)}</div>', unsafe_allow_html=True)
+        link = _course_link(course)
 
+        links.append(
+            f'<a href="{escape(link, quote=True)}" '
+            f'target="_blank" '
+            f'rel="noopener noreferrer" '
+            f'style="'
+            f'display:inline-block;'
+            f'padding:4px 10px;'
+            f'background:rgba(15,23,42,0.75);'
+            f'border:1px solid rgba(255,255,255,0.05);'
+            f'border-radius:12px;'
+            f'box-shadow:0 4px 12px rgba(0,0,0,0.25);'
+            f'color:#4da3ff;'
+            f'text-decoration:none;'
+            f'font-size:0.95rem;'
+            f'font-weight:500;'
+            f'white-space:nowrap;'
+            f'">'
+            f'{escape(label)}'
+            f'</a>'
+        )
+
+    html = (
+        '<div style="'
+        'display:flex;'
+        'flex-wrap:wrap;'
+        'gap:8px;'
+        'margin-top:1rem;'
+        'margin-bottom:1rem;'
+        '">'
+        + "".join(links)
+        + "</div>"
+    )
+
+    st.markdown(html, unsafe_allow_html=True)
 
 # ===========================================================================
 # APP ORCHESTRATOR (MAIN)
@@ -289,12 +318,14 @@ def main():
             st.info('No goal entered.')
             return
 
-        # Parse free-form user text into a structured profile (goal, preferences, skills, avoids).
-        goal, preferences, parser_skills, parser_avoids = parse_input(user_text or '')
-        user_skills = _merge_skill_lists(initial_skills, parser_skills)
-
-        # Generate candidate paths using the planner. This may be CPU-bound.
+        # Show the loading spinner and keep it active until ALL processing is complete.
+        # This includes: parsing, path generation, LLM explanations, and validation.
         with st.spinner('Generating paths...'):
+            # Parse free-form user text into a structured profile (goal, preferences, skills, avoids).
+            goal, preferences, parser_skills, parser_avoids = parse_input(user_text or '')
+            user_skills = _merge_skill_lists(initial_skills, parser_skills)
+
+            # Generate candidate paths using the planner. This may be CPU-bound.
             paths = generate_paths(
                 courses,
                 user_skills,
@@ -305,51 +336,75 @@ def main():
                 criterion_name=selected_criterion,
             )
 
-        # Show detected goal and skills to the user for transparency.
-        st.caption(f'Detected goal: {goal or "not detected"}')
-
-        if not paths:
-            st.warning('No valid paths were found. Adjust the goal, constraints, or existing skills.')
-        else:
-            # Get brief explanations for each path from the LLM helper (optional).
+            # Prepare all data for rendering, including LLM explanations.
+            # Do not show any UI output until everything is ready.
             brief_explanations = []
-            try:
-                brief_explanations = explain_paths_brief(paths, goal)
-            except Exception:
-                # If the LLM helper fails, the UI can still render the raw paths.
-                brief_explanations = []
+            full_comparison_explanation = ''
+            
+            # Only attempt to generate explanations if paths were found.
+            if paths:
+                # Get brief explanations for each path from the LLM helper (optional).
+                try:
+                    brief_explanations = explain_paths_brief(paths, goal)
+                except Exception:
+                    # If the LLM helper fails, the UI can still render the raw paths.
+                    brief_explanations = []
 
-            # Render each path with metrics, explanation, and course links.
-            for i, p in enumerate(paths, 1):
-                target = p.get('target_course') or goal
-                criterion = p.get('criterion') or f'Path {i}'
-                st.subheader(f"{criterion}: {' → '.join(p['path'])}")
-                # show the target course text directly in gray (no label)
-                if target:
-                    st.caption(target)
-                m = p['metrics']
-                st.caption(f"Total time: {m['total_months']} months | Cost: ${m['total_cost']} | Average difficulty: {m['avg_difficulty']}")
+                # Generate qualitative comparison from the LLM helper.
+                try:
+                    full_comparison_explanation = explain_comparison(
+                        paths,
+                        {
+                            'goal': goal,
+                            'skills': user_skills,
+                            'preferences': preferences,
+                            'avoids': parser_avoids,
+                        },
+                    )
+                except Exception:
+                    full_comparison_explanation = ''
+            
+            # Store all processed data in session state to render without additional processing.
+            st.session_state.generation_complete = True
+            st.session_state.goal = goal
+            st.session_state.paths = paths
+            st.session_state.brief_explanations = brief_explanations
+            st.session_state.full_comparison_explanation = full_comparison_explanation
+            st.session_state.user_skills = user_skills
 
-                # show brief multi-line explanation in gray if available
-                if i - 1 < len(brief_explanations):
-                    st.caption(brief_explanations[i - 1])
-                _render_course_buttons(p['path'], course_index)
+        # After the spinner closes, render the completed results from session state.
+        # This ensures no partial results are shown and no additional processing occurs.
+        if st.session_state.get('generation_complete', False):
+            goal = st.session_state.goal
+            paths = st.session_state.paths
+            brief_explanations = st.session_state.brief_explanations
+            full_comparison_explanation = st.session_state.full_comparison_explanation
 
-            # Qualitative comparison generated by the LLM helper (long-form).
-            st.subheader('Qualitative comparison (LLM)')
-            try:
-                explanation = explain_comparison(
-                    paths,
-                    {
-                        'goal': goal,
-                        'skills': user_skills,
-                        'preferences': preferences,
-                        'avoids': parser_avoids,
-                    },
-                )
-            except Exception:
-                explanation = ''
-            st.text_area('Explanation', value=explanation, height=240)
+            # Show detected goal and skills to the user for transparency.
+            st.caption(f'Detected goal: {goal or "not detected"}')
+
+            if not paths:
+                st.warning('No valid paths were found. Adjust the goal, constraints, or existing skills.')
+            else:
+                # Render each path with metrics, explanation, and course links.
+                for i, p in enumerate(paths, 1):
+                    target = p.get('target_course') or goal
+                    criterion = f'Path {i}'
+                    st.subheader(f"{criterion}: {' → '.join(p['path'])}")
+                    # show the target course text directly in gray (no label)
+                    if target:
+                        st.caption(target)
+                    m = p['metrics']
+                    st.caption(f"Total time: {m['total_months']} months | Cost: ${m['total_cost']} | Average difficulty: {m['avg_difficulty']}")
+
+                    # show brief multi-line explanation in gray if available
+                    if i - 1 < len(brief_explanations):
+                        st.caption(brief_explanations[i - 1])
+                    _render_course_buttons(p['path'], course_index)
+
+                # Qualitative comparison generated by the LLM helper (long-form).
+                st.subheader('Qualitative comparison (LLM)')
+                st.text_area('Explanation', value=full_comparison_explanation, height=240)
 
 if __name__ == '__main__':
     main()

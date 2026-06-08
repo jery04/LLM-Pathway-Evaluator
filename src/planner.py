@@ -184,10 +184,22 @@ def build_skill_index(courses: List[Dict]) -> Dict[str, Set[str]]:
             continue
         
         skills = course.get('skills') or []
-        for skill in skills:
-            skill_normalized = (skill or '').strip().lower()
-            if skill_normalized:
-                skill_index[skill_normalized].add(name)
+        for raw_skill in skills:
+            if not isinstance(raw_skill, str):
+                continue
+
+            # Support two formats:
+            # 1) a single skill per list item
+            # 2) many skills concatenated in one string separated by double spaces
+            if '  ' in raw_skill:
+                skill_items = [item.strip() for item in raw_skill.split('  ') if item.strip()]
+            else:
+                skill_items = [raw_skill.strip()]
+
+            for skill in skill_items:
+                skill_normalized = skill.lower()
+                if skill_normalized:
+                    skill_index[skill_normalized].add(name)
     
     return dict(skill_index)
 
@@ -366,74 +378,141 @@ def find_course_by_skill(
     skill: str,
     skill_index: Dict[str, Set[str]],
     embeddings_data: Optional[Dict[str, List[float]]],
-    top_n: int = 3
+    top_n: int = 5
 ) -> List[Dict]:
-    """Find courses most similar to a given skill using embeddings.
-    
-    First checks the provided skill index and, if the skill exists there,
-    adds all matching courses ordered by course-name similarity to the skill.
-    Then it continues with the embedding-based search over embedding.json.
-    
-    Args:
-        skill: The skill or topic to search for
-        courses: Preloaded course list
-        skill_index: Precomputed skill -> courses index
-        embeddings_data: Preloaded embeddings map: {course_name -> embedding}
-        top_n: Number of top courses to return (default: 3)
-    
-    Returns:
-        List of course dictionaries with keys: name, similarity_score
     """
-    
-    skill_normalized = (skill or '').strip().lower()
-    similarities = []
-    seen_courses = set()
+    Hybrid retrieval system that combines semantic embeddings with lexical and index-based signals to rank courses by relevance to a skill query.
+    It improves search quality by filtering noise and merging multiple weak signals into a single stable ranking score.
 
-    if skill_normalized and skill_index.get(skill_normalized):
-        for course_name in skill_index[skill_normalized]:
-            course_name_normalized = (course_name or '').strip().lower()
-            if not course_name_normalized or course_name_normalized in seen_courses:
-                continue
+    General flow:
+    1. Generates skill embedding and extracts normalized tokens.
+    2. Builds candidates using index seeds and semantic similarity over embeddings.
+    3. Reranks results by combining lexical overlap, index boosts, and final semantic score.
+    """
 
-            similarity = _cosine_similarity(get_text_embedding(course_name.strip().lower()),get_text_embedding(skill_normalized))
-            similarities.append({
-                'name': course_name,
-                'similarity_score': similarity
-            })
-            seen_courses.add(course_name_normalized)
 
-    try:
+    # =========================
+    # UTILS (inline)
+    # =========================
+    def cosine(a, b):
+        return _cosine_similarity(a, b)
 
-        if not embeddings_data:
-            return similarities
-        
-        # Generate embedding for the skill
-        skill_embedding = get_text_embedding(skill)
-        if not skill_embedding:
-            return similarities
-        
-        # Calculate similarity with all courses
-        for course_name, course_embedding in embeddings_data.items():
-            course_name_normalized = (course_name or '').strip().lower()
-            
-            if not course_name_normalized or course_name_normalized in seen_courses or not course_embedding:
-                continue
-            
-            # Calculate cosine similarity
-            similarity = _cosine_similarity(skill_embedding, course_embedding)
-            
-            similarities.append({
-                'name': course_name,
-                'similarity_score': similarity
-            })
-            seen_courses.add(course_name_normalized)
-        
-        similarities.sort(key=lambda x: x['similarity_score'], reverse=True)
-        return similarities[:top_n]
-    
-    except Exception as e:
-        print(f"Error finding courses by skill '{skill}': {e}")
-        return similarities
+    def norm(x):
+        # estabilidad sin colapsar scores
+        return max(0.0, min(1.0, (x + 1) / 2))
+
+    def embed(text):
+        return get_text_embedding(text)
+
+    def tokenize(text):
+        return set(text.lower().split())
+
+    # =========================
+    # PREPROCESS
+    # =========================
+    skill = (skill or "").strip().lower()
+    if not skill:
+        return []
+
+    skill_tokens = tokenize(skill)
+    skill_emb = embed(skill)
+
+    if not skill_emb:
+        return []
+
+    # =========================
+    # STAGE 1: CANDIDATE SEEDING (INDEX EXPANSION)
+    # =========================
+    seed = set()
+
+    # exact match
+    if skill in skill_index:
+        seed.update(skill_index[skill])
+
+    # fuzzy key expansion (important improvement)
+    for k, courses in skill_index.items():
+        if skill in k or k in skill:
+            seed.update(courses)
+
+    # =========================
+    # STAGE 2: EMBEDDING RETRIEVAL (MAIN ENGINE)
+    # =========================
+    candidates = {}
+
+    for course_name, course_emb in (embeddings_data or {}).items():
+
+        if not course_emb:
+            continue
+
+        key = course_name.strip().lower()
+
+        # semantic similarity
+        sim = cosine(skill_emb, course_emb)
+        sim = norm(sim)
+
+        # HARD FILTER (crucial for noise removal)
+        if sim < 0.33:
+            continue
+
+        score = sim  # base semantic score
+
+        # =========================
+        # STAGE 3: SIGNAL BOOSTING (NO OVERPOWERING)
+        # =========================
+
+        course_tokens = tokenize(key)
+
+        # 1. lexical overlap (VERY IMPORTANT FIX)
+        overlap = len(skill_tokens & course_tokens)
+        score += overlap * 0.06
+
+        # 2. exact seed boost
+        if key in seed:
+            score += 0.22
+
+        # 3. substring relevance
+        if skill in key:
+            score += 0.18
+
+        # 4. penalty for generic/noisy titles
+        if len(course_tokens) < 3:
+            score -= 0.05
+        if "introduction" in key and overlap == 0:
+            score -= 0.07
+
+        # clamp score
+        score = max(0.0, min(1.0, score))
+
+        candidates[key] = {
+            "name": course_name,
+            "score": score
+        }
+
+    # =========================
+    # STAGE 4: GLOBAL RE-RANKING
+    # =========================
+    results = list(candidates.values())
+
+    # stability boost: prefer higher semantic purity
+    for r in results:
+        name = r["name"].lower()
+
+        # slight penalty for off-domain drift
+        if skill not in name and len(skill_tokens & tokenize(name)) == 0:
+            r["score"] *= 0.98
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+
+    # =========================
+    # OUTPUT
+    # =========================
+    return [
+        {
+            "name": r["name"],
+            "similarity_score": round(r["score"], 4)
+        }
+        for r in results[:top_n]
+    ]
 
 def _get_candidate_courses_for_skill(
     skill: str,
@@ -706,3 +785,4 @@ def generate_paths(
             break
 
     return plans
+

@@ -20,14 +20,16 @@ import time   # Performance measurement and progress tracking (used in generate_
 import spacy  # NLP library for text embeddings and language detection fallback
 from langdetect import detect  # Language detection to choose spacy model (es/en)
 
-load_dotenv()  # Load variables from the .env file
+# Load variables from the .env file
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 # Global Gemini client and model configuration
 api_key = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key)
 
 # Model choice - can be switched to a more advanced model if needed
-MODEL = "gemini-2.5-flash-lite"
+MODEL = "gemini-3.1-flash-lite-preview"
 
 # Pre-load spaCy models for English and Spanish
 nlp_es = spacy.load('es_core_news_md')  # Spanish model
