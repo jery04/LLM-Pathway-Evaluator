@@ -1,5 +1,7 @@
 # LLM Pathway Evaluator 🚀
 
+![Vista del programa corriendo](./previews/header%20post.png)
+
 **Custom Learning Path Generation for Online Course Catalogs**
 
 This system solves a constrained planning and optimization problem in the professional learning domain. Given a set of candidate decisions—courses, skills, certifications—it generates multiple valid learning pathways and evaluates them across technical metrics such as cost, duration, difficulty, and semantic alignment. The architecture uses a Large Language Model (LLM) as an analysis engine to compare, rank, and explain alternative progression strategies.
@@ -150,17 +152,21 @@ streamlit run src/app.py
 
 A typical generated pathway might look like this:
 
-- Target: Learn machine learning with Python
-- Proposed pathway:
-  1. Course: Python Fundamentals
-  2. Course: Statistics for Data Science
-  3. Course: Machine Learning with scikit-learn
-  4. Course: Data Analysis Project
-
-> The engine builds a coherent progression based on semantic relationships among courses, skills, and learning objectives.
+<table>
+  <tr>
+    <td><img src="./previews/post1.png" alt="Vista del programa corriendo"/></td>
+    <td><img src="./previews/post2.png" alt="Vista del programa corriendo"/></td>
+  </tr>
+  <tr>
+    <td><img src="./previews/post3.png" alt="Vista del programa corriendo"/></td>
+    <td><img src="./previews/post4.png" alt="Vista del programa corriendo"/></td>
+  </tr>
+</table>
 
 ---
 
-Built with ❤️ by a human 
-
-
+<div style="display: flex; justify-content: center; align-items: center; padding: 1rem 0;">
+  <p style="font-size: 14px; color: #888;">
+    Built with ❤️ by a human
+  </p>
+</div>
