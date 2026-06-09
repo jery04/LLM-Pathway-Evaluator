@@ -332,7 +332,11 @@ def main():
     default_skills = 'python'
     # Build a form to capture the user's goal, existing skills, and optimization criterion.
     with st.form('input_form'):
-        user_text = st.text_area('Describe your goal and constraints (eg: "I want to learn web design without math")', height=120)
+        user_text = st.text_area(
+            'Describe your goal (eg: "I want to learn web design without math")',
+            height=120,
+            placeholder='I want to learn web design...'
+        )
         initial_skills = st.multiselect('Skills you already have', options=sorted(PREDEFINED_SKILLS), default=default_skills)
         selected_criterion = st.radio(
             'Optimization criteria',

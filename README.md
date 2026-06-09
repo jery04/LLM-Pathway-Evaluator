@@ -1,6 +1,6 @@
-# LLM Pathway Evaluator 🚀
+<h1 align="center">LLM Pathway Evaluator 🚀</h1>
 
-![Vista del programa corriendo](./previews/header%20post.png)
+![Program running preview](./previews/header%20post.png)
 
 **Custom Learning Path Generation for Online Course Catalogs**
 
@@ -152,21 +152,14 @@ streamlit run src/app.py
 
 A typical generated pathway might look like this:
 
-<table>
-  <tr>
-    <td><img src="./previews/post1.png" alt="Vista del programa corriendo"/></td>
-    <td><img src="./previews/post2.png" alt="Vista del programa corriendo"/></td>
-  </tr>
-  <tr>
-    <td><img src="./previews/post3.png" alt="Vista del programa corriendo"/></td>
-    <td><img src="./previews/post4.png" alt="Vista del programa corriendo"/></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="./previews/post1.png" alt="Program running preview" width="45%"/>
+  <img src="./previews/post2.png" alt="Program running preview" width="45%"/>
+  <br/><br/>
+  <img src="./previews/post3.png" alt="Program running preview" width="45%"/>
+  <img src="./previews/post4.png" alt="Program running preview" width="45%"/>
+</p>
 
 ---
 
-<div style="display: flex; justify-content: center; align-items: center; padding: 1rem 0;">
-  <p style="font-size: 14px; color: #888;">
-    Built with ❤️ by a human
-  </p>
-</div>
+<p align="center">Built with ❤️ by a human</p>
