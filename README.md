@@ -21,21 +21,24 @@ The goal is to help learners, professionals, and teams identify the most appropr
 
 ```
 LLM Pathway Evaluator/
-├── README.md                  # Project documentation
-├── requirements.txt           # Python dependencies
+├── README.md                   # Project documentation
+├── requirements.txt            # Python dependencies
+├── .env                        # Environment variables for API keys and config
 ├── data/
-│   ├── embedding.json         # Cached course embeddings
+│   ├── embedding.json          # Cached course embeddings
 │   ├── normalized_courses.json # Normalized course metadata
-│   └── csv/                   # Raw dataset CSV files
+│   └── csv/                    # Raw dataset CSV files
 │       ├── dataset_1.csv
 │       ├── dataset_2.csv
 │       └── ...
+├── previews/                   # UI preview images shown in README
 ├── src/
-│   ├── app.py                 # Streamlit UI for pathway exploration
-│   ├── download_dataset.py    # Kaggle dataset download and normalization
-│   ├── llm_adapter.py         # LLM / spaCy adapter for embeddings and explanations
-│   └── planner.py             # Path planning and course modeling logic
-│
+│   ├── app.py                  # Streamlit UI for pathway exploration
+│   ├── download_dataset.py     # Kaggle dataset download and normalization
+│   ├── llm_adapter.py          # LLM / spaCy adapter for embeddings and explanations
+│   └── planner.py              # Path planning and course modeling logic
+├── tests/                      # Unit tests for core logic
+└── .gitignore
 ```
 
 ## Installation 🛠️
@@ -108,12 +111,6 @@ How to create the `.env` file from the terminal:
 echo "GEMINI_API_KEY=YOUR_API_KEY_HERE" > .env
 ```
 
-- Bash (Linux / macOS / Git Bash):
-
-```bash
-echo "GEMINI_API_KEY=YOUR_API_KEY_HERE" > .env
-```
-
 Step-by-step: how to obtain a Gemini API key (Google Generative AI):
 
 1. 🌐 Open https://console.cloud.google.com/ and sign in with your Google account.
@@ -125,7 +122,18 @@ Step-by-step: how to obtain a Gemini API key (Google Generative AI):
 
 > Note: If you use Generative AI Studio (https://console.generativeai.google), the interface and flow may differ slightly; look for "Credentials" or "API keys" in that interface.
 
-### 6. Launch the web UI (inside the created environment) 🚀
+
+### 6. Run Tests
+
+To verify that all dependencies and setup steps are correct, run the project test harness with the following command:
+
+```bash
+python src/tests_runner.py
+```
+
+> Note: if any test fails, review the previous installation and setup steps before proceeding.
+
+### 7. Launch the web UI (inside the created environment) 🚀
 
 After creating the `.env` file with your API key, run the following command (inside the activated virtual environment):
 
