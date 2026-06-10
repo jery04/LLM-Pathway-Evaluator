@@ -355,7 +355,7 @@ def main():
 
         # Show the loading spinner and keep it active until ALL processing is complete.
         # This includes: parsing, path generation, LLM explanations, and validation.
-        with st.spinner('Generating paths...'):
+        with st.spinner('Generating paths. This may take a few minutes...'):
             # Parse free-form user text into a structured profile (goal, preferences, skills, avoids).
             goal, preferences, parser_skills, parser_avoids = parse_input(user_text or '')
             user_skills = _merge_skill_lists(initial_skills, parser_skills)

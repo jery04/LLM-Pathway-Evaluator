@@ -112,11 +112,15 @@ def load_courses() -> List[Dict]:
     except Exception:
         return []
 
-def _load_embeddings_data() -> Optional[Dict[str, List[float]]]:
-    """Load embeddings from data/embedding.json as {name: embedding}."""
+def _load_embeddings_data(experiment: bool = False) -> Optional[Dict[str, List[float]]]:
+    """Load embeddings from data/embedding.json as {name: embedding}.
+
+    If `experiment` is True, load from `experiments/embedding.json` instead.
+    """
+    base_dir = 'experiments' if experiment else 'data'
     embedding_path = (
         Path(__file__).resolve().parent.parent
-        / 'data'
+        / base_dir
         / 'embedding.json'
     )
 
@@ -245,28 +249,44 @@ def _course_metrics(course: Dict) -> Dict[str, float]:
     }
 
 def _score_course_for_criterion(course: Dict, criterion_name: str) -> float:
-    """Compute a scalar optimization score for a single course."""
+    """Compute a normalized optimization score for a course under a given criterion.
+
+    Uses min-max domain normalization so all metrics are comparable in [0, 1].
+    Lower score = better candidate for that criterion.
+    """
     m = _course_metrics(course)
-    # Criteria are handled strictly in English and compared by their original labels.
+
+    COST_MAX       = 500.0
+    DURATION_MAX   = 6.0
+    DIFFICULTY_MAX = 10.0
+
+    cost_n       = max(0.0, min(1.0, m['cost_usd']        / COST_MAX))
+    duration_n   = max(0.0, min(1.0, m['duration_months'] / DURATION_MAX))
+    difficulty_n = max(0.0, min(1.0, m['difficulty']       / DIFFICULTY_MAX))
+
     if criterion_name == 'Cheapest path':
-        return m['cost_usd'] + 0.35 * m['duration_months'] + 0.2 * m['difficulty']
+        # Minimize total money spent; time and difficulty are minor tiebreakers.
+        return (
+            0.80 * cost_n
+            + 0.12 * duration_n
+            + 0.08 * difficulty_n
+        )
+
     if criterion_name == 'Fastest path':
-        return m['duration_months'] + 0.001 * m['cost_usd'] + 0.25 * m['difficulty']
+        # Minimize calendar time; harder courses take longer in practice,
+        # so difficulty is a meaningful secondary signal. Cost is irrelevant.
+        return (
+            0.80 * duration_n
+            + 0.18 * difficulty_n
+            + 0.02 * cost_n
+        )
 
-    # Balanced: simple weighted combination for robust ranking.
-    return 0.5 * m['duration_months'] + 0.002 * m['cost_usd'] + 0.4 * m['difficulty']
-
-def _sort_courses_by_criterion(
-    course_names: List[str],
-    course_index: Dict[str, Dict],
-    criterion_name: str,
-) -> List[str]:
-    """Return course names ordered from best to worst for criterion."""
-    return sorted(
-        [name for name in course_names if name in course_index],
-        key=lambda name: _score_course_for_criterion(course_index[name], criterion_name),
+    # 'Balanced path' (default) — equal trade-off, slightly prefer free & shorter.
+    return (
+        0.45 * duration_n
+        + 0.35 * cost_n
+        + 0.20 * difficulty_n
     )
-
 
 # =============================================================================
 # UTILITIES: SIMILARITY, SKILL COVERAGE & CATEGORY FILTERS
@@ -378,7 +398,7 @@ def find_course_by_skill(
     skill: str,
     skill_index: Dict[str, Set[str]],
     embeddings_data: Optional[Dict[str, List[float]]],
-    top_n: int = 5
+    top_n: int = 6
 ) -> List[Dict]:
     """
     Hybrid retrieval system that combines semantic embeddings with lexical and index-based signals to rank courses by relevance to a skill query.
@@ -521,24 +541,44 @@ def _get_candidate_courses_for_skill(
     course_index: Dict[str, Dict],
     avoid_categories: Optional[List[str]],
     criterion_name: str,
-    top_n: int = 4,
+    top_n: int = 6,
+    exclude_courses: Optional[Set[str]] = None,  # <-- nuevo
 ) -> List[str]:
-    """Find and rank candidate courses that can cover a required skill."""
-    candidates = []
+    """Find and rank candidate courses that can cover a required skill.
+
+    Combines semantic relevance with criterion-based optimization via a
+    weighted hybrid score, so the returned list reflects BOTH fit and
+    the user's optimization goal (cheapest / fastest / balanced).
+
+    Args:
+        exclude_courses: set of course names already present in the current
+                         path; filtered out before ranking to prevent duplicates.
+    """
+    # --- 1. Retrieve semantically relevant candidates ---
+    raw_candidates: List[Dict] = []
     try:
-        candidates = find_course_by_skill(
+        raw_candidates = find_course_by_skill(
             skill=skill,
             skill_index=skill_index,
             embeddings_data=embeddings_data,
-            top_n=max(6, top_n),
+            top_n=max(12, top_n * 3),
         )
     except Exception:
-        candidates = []
+        raw_candidates = []
 
-    names = []
-    for item in candidates:
+    # --- 2. Filter: must exist in index, pass category exclusions, and not be a duplicate ---
+    _excluded = exclude_courses or set()
+    seen_names: Set[str] = set()   # <-- dedup dentro del propio raw_candidates
+    filtered: List[Dict] = []
+    for item in raw_candidates:
         name = (item.get('name') or '').strip()
+        if not name:
+            continue
+        if name in seen_names:          # <-- evita duplicados internos del retriever
+            continue
         if name not in course_index:
+            continue
+        if name in _excluded:           # <-- evita cursos ya usados en el path
             continue
         if not _passes_category_filter(
             course_index[name],
@@ -546,10 +586,56 @@ def _get_candidate_courses_for_skill(
             embeddings_data or {},
         ):
             continue
-        names.append(name)
+        seen_names.add(name)
+        filtered.append(item)
 
-    names = _sort_courses_by_criterion(names, course_index, criterion_name)
-    return names[:top_n]
+    if not filtered:
+        return []
+
+    # --- 3. Compute per-criterion score for each candidate (normalized, lower = better) ---
+    criterion_scores: Dict[str, float] = {
+        item['name']: _score_course_for_criterion(course_index[item['name']], criterion_name)
+        for item in filtered
+    }
+
+    min_c = min(criterion_scores.values())
+    max_c = max(criterion_scores.values())
+    c_range = max_c - min_c if max_c > min_c else 1.0
+
+    def norm_criterion(name: str) -> float:
+        return (criterion_scores[name] - min_c) / c_range
+
+    # --- 4. Normalize similarity scores to [0, 1] (higher raw score = more relevant) ---
+    sim_scores: Dict[str, float] = {
+        item['name']: float(item.get('similarity_score', 0.0))
+        for item in filtered
+    }
+    max_s = max(sim_scores.values()) if sim_scores else 1.0
+    min_s = min(sim_scores.values()) if sim_scores else 0.0
+    s_range = max_s - min_s if max_s > min_s else 1.0
+
+    def norm_sim(name: str) -> float:
+        return (sim_scores[name] - min_s) / s_range
+
+    # --- 5. Hybrid score: relevance pulls up, criterion cost pulls down ---
+    CRITERION_WEIGHT = {
+        'Cheapest path': 0.38,
+        'Fastest path':  0.38,
+        'Balanced path': 0.25,
+    }
+    w_criterion = CRITERION_WEIGHT.get(criterion_name, 0.25)
+    w_relevance = 1.0 - w_criterion
+
+    def hybrid_score(name: str) -> float:
+        return w_criterion * norm_criterion(name) - w_relevance * norm_sim(name)
+
+    # --- 6. Sort ascending (lower hybrid score = better match + better criterion fit) ---
+    ranked = sorted(filtered, key=lambda item: hybrid_score(item['name']))
+
+    return [item['name'] for item in ranked[:top_n]]
+
+
+
 
 def _infer_prereq_skills_for_topic(
     topic: str,
@@ -624,9 +710,11 @@ def _resolve_route_for_target_course(
     visited: Optional[Set[str]] = None,
 ) -> Optional[CourseNode]:
     """Recursively resolve prerequisites and build a CourseNode tree.
-    Detects cycles and returns None for missing or already visited courses.
-    """
 
+    Each recursive call receives its own local visited copy so that
+    sibling prerequisite branches don't block each other. The caller
+    is responsible for tracking cross-path deduplication separately.
+    """
     if visited is None:
         visited = set()
 
@@ -637,7 +725,9 @@ def _resolve_route_for_target_course(
     if not course:
         return None
 
-    visited.add(target_course_name)
+    # Clone visited so sibling branches don't interfere with each other.
+    local_visited = set(visited)
+    local_visited.add(target_course_name)
 
     node = CourseNode(name=target_course_name)
 
@@ -648,8 +738,17 @@ def _resolve_route_for_target_course(
 
     for skill in prereq_skills:
 
-        # si el usuario ya domina la skill
         if _is_skill_covered(skill, initial_skills):
+            continue
+
+        # Skills already covered by courses added in this branch
+        skills_in_branch: List[str] = []
+        for visited_course_name in local_visited:
+            visited_course = course_index.get(visited_course_name)
+            if visited_course:
+                skills_in_branch.extend(visited_course.get('skills') or [])
+
+        if _is_skill_covered(skill, skills_in_branch):
             continue
 
         candidates = _get_candidate_courses_for_skill(
@@ -659,17 +758,25 @@ def _resolve_route_for_target_course(
             course_index=course_index,
             avoid_categories=avoid_categories,
             criterion_name=criterion_name,
-            top_n=3,
+            top_n=6,
+            exclude_courses=local_visited,
         )
 
         if not candidates:
             node.unresolved.append(skill)
             continue
 
-        # guardamos alternativas (no usadas)
         node.alternatives.extend(candidates[1:3])
 
-        best_course = candidates[0]
+        # Pick the best candidate not already in this branch's visited set.
+        best_course = next(
+            (c for c in candidates if c not in local_visited),
+            None,
+        )
+
+        if best_course is None:
+            node.unresolved.append(skill)
+            continue
 
         child = _resolve_route_for_target_course(
             target_course_name=best_course,
@@ -680,12 +787,13 @@ def _resolve_route_for_target_course(
             criterion_name=criterion_name,
             avoid_categories=avoid_categories,
             prereq_cache=prereq_cache,
-            visited=visited,
+            visited=local_visited,
         )
 
         if child:
             child.skill = skill
             node.children.append(child)
+            local_visited.add(best_course)
 
     return node
 
@@ -697,22 +805,27 @@ def generate_paths(
     avoid_categories: Optional[List[str]] = None,
     user_prefs: Optional[List[str]] = None,
     criterion_name: Optional[str] = None,
+    experiment: bool = False
 ) -> List[Dict]:
     """Generate ranked learning paths from initial skills toward an objective.
-    Returns a list of plan dicts containing ordered steps and aggregated metrics.
-    """
 
+    Each target course gets its own isolated visited set so the resolver
+    can freely pick the best prerequisites per path without being polluted
+    by choices made for other paths.
+
+    Final plans are sorted by the active criterion so the best path
+    for the user's goal always appears first.
+    """
     if not courses:
         return []
 
     initial_skills = initial_skills or []
     user_prefs = user_prefs or []
-
     criterion = criterion_name if criterion_name else 'Balanced path'
-    
+
     course_index = index_courses(courses)
     skill_index = build_skill_index(courses)
-    embeddings_data = _load_embeddings_data()
+    embeddings_data = _load_embeddings_data(experiment)
 
     target_courses = _get_candidate_courses_for_skill(
         skill=objective,
@@ -721,17 +834,17 @@ def generate_paths(
         course_index=course_index,
         avoid_categories=avoid_categories,
         criterion_name=criterion,
-        top_n=max_paths,
+        top_n=max_paths*2,
     )
 
     if not target_courses:
         return []
 
     plans = []
-    visited_global = set()
 
     for target in target_courses[:max_paths]:
 
+        # Isolated visited set per path — prevents cross-path pollution.
         tree = _resolve_route_for_target_course(
             target_course_name=target,
             course_index=course_index,
@@ -741,7 +854,7 @@ def generate_paths(
             criterion_name=criterion,
             avoid_categories=avoid_categories,
             prereq_cache={},
-            visited=visited_global,
+            visited=set(),
         )
 
         if not tree:
@@ -749,40 +862,56 @@ def generate_paths(
 
         ordered_path = CourseNode.flatten(tree)
 
-        totals = {
-            "duration": 0.0,
-            "cost": 0.0,
-            "difficulty": 0.0
-        }
-
+        # Remove duplicate courses while preserving order. This prevents
+        # repeated course entries when the same prerequisite is selected
+        # for multiple inferred skills in the same learning path.
+        unique_ordered_path = []
+        seen_courses = set()
         for name in ordered_path:
-            metrics = _course_metrics(course_index[name])
-            totals["duration"] += metrics["duration_months"]
-            totals["cost"] += metrics["cost_usd"]
-            totals["difficulty"] += metrics["difficulty"]
+            if name not in seen_courses:
+                unique_ordered_path.append(name)
+                seen_courses.add(name)
+        ordered_path = unique_ordered_path
 
-        avg_difficulty = (
-            totals["difficulty"] / len(ordered_path)
-            if ordered_path
-            else 0.0
-        )
+        totals = {'duration': 0.0, 'cost': 0.0, 'difficulty': 0.0}
+        for name in ordered_path:
+            m = _course_metrics(course_index[name])
+            totals['duration']   += m['duration_months']
+            totals['cost']       += m['cost_usd']
+            totals['difficulty'] += m['difficulty']
+
+        avg_difficulty = totals['difficulty'] / len(ordered_path) if ordered_path else 0.0
 
         plans.append({
-            "target_course": target,
-            "course_path": ordered_path,
-            "path": ordered_path,
-            "steps": ordered_path,
-            "user_prefs": user_prefs,
-            "metrics": {
-                "total_months": round(totals["duration"], 2),
-                "total_cost": round(totals["cost"], 2),
-                "avg_difficulty": round(avg_difficulty, 2),
-                "steps": len(ordered_path),
+            'target_course': target,
+            'course_path':   ordered_path,
+            'path':          ordered_path,
+            'steps':         ordered_path,
+            'user_prefs':    user_prefs,
+            'metrics': {
+                'total_months':    round(totals['duration'],   2),
+                'total_cost':      round(totals['cost'],       2),
+                'avg_difficulty':  round(avg_difficulty,       2),
+                'steps':           len(ordered_path),
             },
         })
 
-        if len(plans) >= max_paths:
-            break
+    # ------------------------------------------------------------------ #
+    # Re-rank final plans by the active criterion so the best path
+    # for the user's goal always surfaces first.
+    # ------------------------------------------------------------------ #
+    def _plan_sort_key(plan: Dict) -> float:
+        m = plan['metrics']
+        cost_n       = min(m['total_cost']     / 500.0, 1.0)
+        duration_n   = min(m['total_months']   / 6.0,   1.0)
+        difficulty_n = min(m['avg_difficulty'] / 10.0,  1.0)
+
+        if criterion == 'Cheapest path':
+            return 0.80 * cost_n + 0.12 * duration_n + 0.08 * difficulty_n
+        if criterion == 'Fastest path':
+            return 0.80 * duration_n + 0.18 * difficulty_n + 0.02 * cost_n
+        return 0.45 * duration_n + 0.35 * cost_n + 0.20 * difficulty_n
+
+    plans.sort(key=_plan_sort_key)
 
     return plans
-

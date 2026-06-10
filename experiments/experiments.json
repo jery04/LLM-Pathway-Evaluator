@@ -1,0 +1,460 @@
+[
+  {
+    "name": "Python for Beginners",
+    "duration_months": 1,
+    "difficulty": 1,
+    "category": "Programming",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Python Syntax", "Variables", "Loops", "Functions"],
+    "link": "https://www.py4e.com/"
+  },
+  {
+    "name": "Basic Mathematics",
+    "duration_months": 1,
+    "difficulty": 2,
+    "category": "Mathematics",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Arithmetic", "Fractions", "Percentages", "Exponents"],
+    "link": "https://www.khanacademy.org/math/arithmetic"
+  },
+  {
+    "name": "Arithmetic & Pre-algebra Basics",
+    "duration_months": 0.5,
+    "difficulty": 1,
+    "category": "Mathematics",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Addition", "Subtraction", "Multiplication", "Division"],
+    "link": "https://www.khanacademy.org/math/arithmetic"
+  },
+  {
+    "name": "Introduction to Variables & Equations",
+    "duration_months": 0.5,
+    "difficulty": 1,
+    "category": "Mathematics",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Variables", "Simple Equations", "Inequalities"],
+    "link": "https://www.khanacademy.org/math/algebra-basics"
+  },
+  {
+    "name": "Basic Geometry for Data Understanding",
+    "duration_months": 0.5,
+    "difficulty": 1,
+    "category": "Mathematics",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Points", "Lines", "Angles", "Coordinate Plane"],
+    "link": "https://www.khanacademy.org/math/basic-geo"
+  },
+  {
+    "name": "Linear Algebra",
+    "duration_months": 1,
+    "difficulty": 3,
+    "category": "Mathematics",
+    "cost_usd": 0,
+    "level": "Intermediate",
+    "skills": ["Vectors", "Matrices", "Eigenvalues", "Dot Product"],
+    "link": "https://ocw.mit.edu/courses/18-06-linear-algebra-spring-2010/"
+  },
+  {
+    "name": "Data & Probability Basics",
+    "duration_months": 0.5,
+    "difficulty": 1,
+    "category": "Statistics",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Mean", "Median", "Mode", "Basic Probability"],
+    "link": "https://www.khanacademy.org/math/statistics-probability"
+  },
+  {
+    "name": "Introduction to Data Distributions",
+    "duration_months": 0.5,
+    "difficulty": 2,
+    "category": "Statistics",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Histograms", "Box Plots", "Normal Distribution"],
+    "link": "https://www.khanacademy.org/math/statistics-probability"
+  },
+  {
+    "name": "Understanding Random Variables",
+    "duration_months": 0.5,
+    "difficulty": 2,
+    "category": "Statistics",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Discrete", "Continuous", "Expected Value"],
+    "link": "https://www.khanacademy.org/math/statistics-probability"
+  },
+  {
+    "name": "Statistics & Probability",
+    "duration_months": 1,
+    "difficulty": 3,
+    "category": "Statistics",
+    "cost_usd": 0,
+    "level": "Intermediate",
+    "skills": ["Mean/Median", "Normal Distribution", "Hypothesis Testing", "Bayes Theorem"],
+    "link": "https://www.khanacademy.org/math/statistics-probability"
+  },
+  {
+    "name": "SQL for Data Analysis",
+    "duration_months": 1,
+    "difficulty": 2,
+    "category": "Databases",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["SELECT", "JOINs", "GROUP BY", "Subqueries"],
+    "link": "https://www.sqlzoo.net/"
+  },
+  {
+    "name": "Excel Basics for Data",
+    "duration_months": 0.5,
+    "difficulty": 1,
+    "category": "Data Tools",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Tables", "Filters", "Basic Formulas"],
+    "link": "https://support.microsoft.com/en-us/excel"
+  },
+  {
+    "name": "Introduction to Data Types & Structures",
+    "duration_months": 0.5,
+    "difficulty": 1,
+    "category": "Programming",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Integers", "Strings", "Lists", "Dictionaries"],
+    "link": "https://www.w3schools.com/python/"
+  },
+  {
+    "name": "Git & GitHub for Version Control",
+    "duration_months": 0.5,
+    "difficulty": 2,
+    "category": "Tools",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Clone", "Commit", "Push", "Pull"],
+    "link": "https://github.com/"
+  },
+  {
+    "name": "Data Cleaning & Pandas",
+    "duration_months": 1,
+    "difficulty": 3,
+    "category": "Data Wrangling",
+    "cost_usd": 0,
+    "level": "Intermediate",
+    "skills": ["Pandas", "Missing Data", "Data Transformation", "Merging"],
+    "link": "https://www.kaggle.com/learn/pandas"
+  },
+  {
+    "name": "Data Visualization (Matplotlib & Seaborn)",
+    "duration_months": 1,
+    "difficulty": 3,
+    "category": "Visualization",
+    "cost_usd": 0,
+    "level": "Intermediate",
+    "skills": ["Line/Bar Plots", "Histograms", "Heatmaps", "Seaborn"],
+    "link": "https://www.kaggle.com/learn/data-visualization"
+  },
+  {
+    "name": "Intro to Machine Learning (Scikit-learn)",
+    "duration_months": 1,
+    "difficulty": 4,
+    "category": "Machine Learning",
+    "cost_usd": 0,
+    "level": "Intermediate",
+    "skills": ["Regression", "Classification", "Train/Test Split", "Random Forest"],
+    "link": "https://www.kaggle.com/learn/intro-to-machine-learning"
+  },
+
+
+
+
+  
+
+
+
+
+
+
+
+
+  {
+    "name": "Zero to Python in 2 Weeks",
+    "duration_months": 0.5,
+    "difficulty": 2,
+    "category": "Programming",
+    "cost_usd": 100,
+    "level": "Beginner",
+    "skills": ["Python Basics", "Data Types", "Control Flow", "Functions"],
+    "link": "https://www.coursera.org/learn/python-crash-course"
+  },
+  {
+    "name": "Basic Algebra Crash Course",
+    "duration_months": 0.25,
+    "difficulty": 1,
+    "category": "Mathematics",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Equations", "Functions", "Graphing"],
+    "link": "https://www.khanacademy.org/math/algebra"
+  },
+  {
+    "name": "Intro to Calculus Basics",
+    "duration_months": 0.25,
+    "difficulty": 2,
+    "category": "Mathematics",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Derivatives", "Integrals", "Limits"],
+    "link": "https://www.khanacademy.org/math/calculus-1"
+  },
+  {
+    "name": "Probability Fundamentals",
+    "duration_months": 0.25,
+    "difficulty": 2,
+    "category": "Statistics",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Events", "Conditional Probability", "Bayes Rule"],
+    "link": "https://www.khanacademy.org/math/statistics-probability"
+  },
+  {
+    "name": "Essential Math for Data Science (Fast Track)",
+    "duration_months": 0.5,
+    "difficulty": 3,
+    "category": "Mathematics",
+    "cost_usd": 100,
+    "level": "Intermediate",
+    "skills": ["Linear Algebra", "Calculus Basics", "Probability"],
+    "link": "https://www.udemy.com/course/math-for-data-science/"
+  },
+  {
+    "name": "SQL Bootcamp: From Zero to Advanced",
+    "duration_months": 0.5,
+    "difficulty": 2,
+    "category": "Databases",
+    "cost_usd": 100,
+    "level": "Beginner",
+    "skills": ["Queries", "Joins", "Indexes", "Window Functions"],
+    "link": "https://www.udemy.com/course/the-complete-sql-bootcamp/"
+  },
+  {
+    "name": "Python Functions & Modules Deep Dive",
+    "duration_months": 0.25,
+    "difficulty": 2,
+    "category": "Programming",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Lambda", "Map", "Filter", "Reduce"],
+    "link": "https://realpython.com/python-functions/"
+  },
+  {
+    "name": "Object Oriented Programming in Python",
+    "duration_months": 0.25,
+    "difficulty": 2,
+    "category": "Programming",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Classes", "Inheritance", "Polymorphism"],
+    "link": "https://realpython.com/python3-object-oriented-programming/"
+  },
+  {
+    "name": "Introduction to NumPy",
+    "duration_months": 0.25,
+    "difficulty": 2,
+    "category": "Programming",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Arrays", "Broadcasting", "Vectorization"],
+    "link": "https://numpy.org/learn/"
+  },
+  {
+    "name": "Data Science Intensive (Python, Pandas, ML)",
+    "duration_months": 1,
+    "difficulty": 4,
+    "category": "Integrated Program",
+    "cost_usd": 200,
+    "level": "Intermediate",
+    "skills": ["Pandas", "NumPy", "Matplotlib", "Scikit-learn", "ML Models"],
+    "link": "https://www.datacamp.com/career-tracks/data-scientist-with-python"
+  },
+  {
+    "name": "Production ML & MLOps Basics",
+    "duration_months": 0.5,
+    "difficulty": 4,
+    "category": "Engineering",
+    "cost_usd": 50,
+    "level": "Intermediate",
+    "skills": ["Docker", "FastAPI", "Model Serving"],
+    "link": "https://www.coursera.org/learn/mlops"
+  },
+  {
+    "name": "Advanced Kaggle Competitions",
+    "duration_months": 0.5,
+    "difficulty": 4,
+    "category": "Project-based",
+    "cost_usd": 0,
+    "level": "Intermediate",
+    "skills": ["Feature Engineering", "Ensemble Methods"],
+    "link": "https://www.kaggle.com/learn"
+  },
+  {
+    "name": "Data Storytelling & Presentation",
+    "duration_months": 0.5,
+    "difficulty": 3,
+    "category": "Soft Skills",
+    "cost_usd": 0,
+    "level": "Intermediate",
+    "skills": ["Dashboards", "Reports", "Communication"],
+    "link": "https://www.coursera.org/learn/data-storytelling"
+  },
+  {
+    "name": "Data Science",
+    "duration_months": 1,
+    "difficulty": 5,
+    "category": "Project-based",
+    "cost_usd": 100,
+    "level": "Advanced",
+    "skills": ["End-to-end Pipeline", "Model Deployment", "Kaggle Competitions"],
+    "link": "https://www.udacity.com/course/data-scientist-nanodegree--nd025"
+  },
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  {
+    "name": "Python for Everybody (University of Michigan)",
+    "duration_months": 1,
+    "difficulty": 1,
+    "category": "Programming",
+    "cost_usd": 50,
+    "level": "Beginner",
+    "skills": ["Python Basics", "Data Structures", "File Handling"],
+    "link": "https://www.coursera.org/specializations/python"
+  },
+  {
+    "name": "College Algebra Refresher",
+    "duration_months": 0.5,
+    "difficulty": 1,
+    "category": "Mathematics",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Quadratic Equations", "Logarithms", "Exponentials"],
+    "link": "https://www.khanacademy.org/math/algebra"
+  },
+  {
+    "name": "Basic Descriptive Statistics",
+    "duration_months": 0.5,
+    "difficulty": 2,
+    "category": "Statistics",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Variance", "Standard Deviation", "Correlation"],
+    "link": "https://www.khanacademy.org/math/statistics-probability"
+  },
+  {
+    "name": "Pre-Calculus Essentials",
+    "duration_months": 0.5,
+    "difficulty": 2,
+    "category": "Mathematics",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Trigonometry", "Complex Numbers", "Vectors"],
+    "link": "https://www.khanacademy.org/math/precalculus"
+  },
+  {
+    "name": "Math for Machine Learning (Imperial College London)",
+    "duration_months": 1,
+    "difficulty": 3,
+    "category": "Mathematics",
+    "cost_usd": 0,
+    "level": "Intermediate",
+    "skills": ["Linear Algebra", "Multivariate Calculus", "PCA"],
+    "link": "https://www.coursera.org/specializations/mathematics-for-machine-learning"
+  },
+  {
+    "name": "Google Data Analytics Certificate",
+    "duration_months": 2,
+    "difficulty": 2,
+    "category": "Data Analytics",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Spreadsheets", "SQL", "R", "Tableau", "Data Cleaning"],
+    "link": "https://www.coursera.org/professional-certificates/google-data-analytics"
+  },
+  {
+    "name": "Command Line & Terminal Basics",
+    "duration_months": 0.25,
+    "difficulty": 1,
+    "category": "Tools",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["cd", "ls", "mkdir", "grep"],
+    "link": "https://www.codecademy.com/learn/learn-the-command-line"
+  },
+  {
+    "name": "Introduction to APIs & JSON",
+    "duration_months": 0.25,
+    "difficulty": 2,
+    "category": "Programming",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["GET", "POST", "JSON Parsing"],
+    "link": "https://realpython.com/api-integration-in-python/"
+  },
+  {
+    "name": "Jupyter Notebooks & Environments",
+    "duration_months": 0.25,
+    "difficulty": 1,
+    "category": "Tools",
+    "cost_usd": 0,
+    "level": "Beginner",
+    "skills": ["Cells", "Markdown", "Kernels"],
+    "link": "https://jupyter.org/"
+  },
+  {
+    "name": "IBM Data Science Professional Certificate",
+    "duration_months": 1,
+    "difficulty": 3,
+    "category": "Integrated Program",
+    "cost_usd": 50,
+    "level": "Intermediate",
+    "skills": ["Python", "Pandas", "SQL", "Visualization", "ML Basics"],
+    "link": "https://www.coursera.org/professional-certificates/ibm-data-science"
+  },
+  {
+    "name": "Intro to Machine Learning (Kaggle)",
+    "duration_months": 0.5,
+    "difficulty": 3,
+    "category": "Machine Learning",
+    "cost_usd": 0,
+    "level": "Intermediate",
+    "skills": ["Random Forest", "Cross-Validation", "Model Tuning"],
+    "link": "https://www.kaggle.com/learn/intro-to-machine-learning"
+  },
+  {
+    "name": "Practical Data Science Projects",
+    "duration_months": 0.5,
+    "difficulty": 4,
+    "category": "Project-based",
+    "cost_usd": 50,
+    "level": "Intermediate",
+    "skills": ["End-to-End Projects", "Portfolio Building", "Git/GitHub"],
+    "link": "https://www.datacamp.com/projects"
+  }
+]
