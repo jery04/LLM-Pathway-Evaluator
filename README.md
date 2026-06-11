@@ -77,7 +77,11 @@ If you use Git Bash or WSL:
 source .venv/bin/activate
 ```
 
-### 3. Install dependencies 📦
+### 3. Update pip and Install dependencies 📦
+
+```bash
+python -m pip install --upgrade pip
+```
 
 ```bash
 pip install -r requirements.txt
