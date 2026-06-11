@@ -12,6 +12,7 @@ from dotenv import load_dotenv # Load environment variables from .env file for A
 import os   # Operating system interactions for file paths and environment variables
 import json # JSON serialization/deserialization for cache and data exchange
 import re   # Regular expressions for parsing LLM responses
+import functools  # Function decorators for caching and optimization
 from typing import Dict, List, Tuple  # Type hints for dictionaries, lists, and tuples
 from pathlib import Path     # Object-oriented filesystem path manipulation
 from typing import Optional  # Type hint for optional values (None or T)
@@ -62,8 +63,9 @@ def ask_llm(prompt: str) -> str:
         model=MODEL,
         contents=prompt
     )
-    
-    return response.text.strip()
+
+    text = getattr(response, "text", "") or ""
+    return text.strip()
 
 
 # ===========================================================================
@@ -219,7 +221,7 @@ def explain_comparison(paths: List[Dict], user_profile: Dict) -> str:
 # EMBEDDINGS GENERATION
 # ===========================================================================
 
-def get_text_embedding(text: str) -> Optional[List[float]]:
+def _get_text_embedding_raw(text: str) -> Optional[List[float]]:
     """Generate a spaCy text embedding for a single input using language detection.
     The embedding is produced by a model selected for the detected text language.
     """
@@ -234,6 +236,13 @@ def get_text_embedding(text: str) -> Optional[List[float]]:
     except Exception as e:
         print(f"⚠️ Error processing text '{text}': {e}")
         return None
+
+@functools.lru_cache(maxsize=2048)
+def get_text_embedding(text: str) -> Optional[List[float]]:
+    """Cached wrapper for text embedding generation.
+    Caches up to 2048 embeddings to avoid recomputing duplicate text vectors.
+    """
+    return _get_text_embedding_raw(text)
 
 def generate_embeddings(data_dir: Path) -> Optional[Path]:
     """Create and save spaCy embeddings for course titles, skipping existing files.
@@ -314,16 +323,12 @@ def infer_prerequisites_for_objective(objective: str) -> List[str]:
         "Objective: 'Calculus' -> 'Algebra, Trigonometry'\n"
     )
     try:
-        response = ask_llm(prompt)
+        response = ask_llm(prompt) or ""
         
         # Parse comma-separated prerequisites
-        if response:
-            prerequisites = [p.strip() for p in response.split(',') if p.strip()]
-            return prerequisites
-        
-        return []
+        prerequisites = [p.strip() for p in response.split(',') if p.strip()]
+        return prerequisites
     
     except Exception as e:
         print(f"Error inferring prerequisites for objective '{objective}': {e}")
         return []
-

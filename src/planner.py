@@ -207,24 +207,6 @@ def build_skill_index(courses: List[Dict]) -> Dict[str, Set[str]]:
     
     return dict(skill_index)
 
-def build_category_index(courses: List[Dict]) -> Dict[str, Set[str]]:
-    """Build a category -> set of course names index.
-    
-    Returns: {category -> {course_names_in_this_category}}
-    """
-    category_index = defaultdict(set)
-    
-    for course in courses:
-        name = (course.get('name') or '').strip()
-        if not name:
-            continue
-        
-        category = (course.get('category') or 'Uncategorized').strip().lower()
-        category_index[category].add(name)
-    
-    return dict(category_index)
-
-
 # =============================================================================
 # COURSE SCORING LOGIC (COST, DURATION & DIFFICULTY)
 # =============================================================================
@@ -292,53 +274,49 @@ def _score_course_for_criterion(course: Dict, criterion_name: str) -> float:
 # UTILITIES: SIMILARITY, SKILL COVERAGE & CATEGORY FILTERS
 # =============================================================================
 
+
 def _cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
     """Calculate cosine similarity between two vectors.
-    
     Returns a value between -1 and 1, where 1 means identical direction.
     """
     if not vec1 or not vec2 or len(vec1) != len(vec2):
         return 0.0
-    
-    dot_product = sum(a * b for a, b in zip(vec1, vec2))
-    norm1 = math.sqrt(sum(a * a for a in vec1))
-    norm2 = math.sqrt(sum(b * b for b in vec2))
-    
-    if norm1 == 0 or norm2 == 0:
+
+    dot_product = 0.0
+    norm1_sq = 0.0
+    norm2_sq = 0.0
+    for a, b in zip(vec1, vec2):
+        dot_product += a * b
+        norm1_sq += a * a
+        norm2_sq += b * b
+
+    if norm1_sq == 0.0 or norm2_sq == 0.0:
         return 0.0
-    
-    return dot_product / (norm1 * norm2)
+
+    return dot_product / math.sqrt(norm1_sq * norm2_sq)
 
 def _is_skill_covered(skill: str, known_skills: List[str]) -> bool:
-    """Return True if a skill is already covered by user-known skills."""
-
     s = _normalize_token(skill)
     if not s:
         return True
+
+    # Fast lexical pass first — no embeddings needed
+    known_normalized = [_normalize_token(k) for k in known_skills]
+    for k in known_normalized:
+        if k and (s == k or s in k or k in s):
+            return True
 
     skill_embedding = get_text_embedding(s)
     if not skill_embedding:
         return False
 
-    for known in known_skills:
-        k = _normalize_token(known)
+    for k in known_normalized:
         if not k:
             continue
-
-        # Fast lexical match
-        if s == k or s in k or k in s:
-            return True
-
         known_embedding = get_text_embedding(k)
         if not known_embedding:
             continue
-
-        similarity = _cosine_similarity(
-            skill_embedding,
-            known_embedding
-        )
-
-        if similarity >= SIMILARITY_THRESHOLD:
+        if _cosine_similarity(skill_embedding, known_embedding) >= SIMILARITY_THRESHOLD:
             return True
 
     return False
@@ -410,15 +388,10 @@ def find_course_by_skill(
     3. Reranks results by combining lexical overlap, index boosts, and final semantic score.
     """
 
-
-    # =========================
-    # UTILS (inline)
-    # =========================
     def cosine(a, b):
         return _cosine_similarity(a, b)
 
     def norm(x):
-        # estabilidad sin colapsar scores
         return max(0.0, min(1.0, (x + 1) / 2))
 
     def embed(text):
@@ -427,9 +400,7 @@ def find_course_by_skill(
     def tokenize(text):
         return set(text.lower().split())
 
-    # =========================
     # PREPROCESS
-    # =========================
     skill = (skill or "").strip().lower()
     if not skill:
         return []
@@ -440,23 +411,17 @@ def find_course_by_skill(
     if not skill_emb:
         return []
 
-    # =========================
-    # STAGE 1: CANDIDATE SEEDING (INDEX EXPANSION)
-    # =========================
+    # STAGE 1: CANDIDATE SEEDING
     seed = set()
 
-    # exact match
     if skill in skill_index:
         seed.update(skill_index[skill])
 
-    # fuzzy key expansion (important improvement)
     for k, courses in skill_index.items():
         if skill in k or k in skill:
             seed.update(courses)
 
-    # =========================
-    # STAGE 2: EMBEDDING RETRIEVAL (MAIN ENGINE)
-    # =========================
+    # STAGE 2: EMBEDDING RETRIEVAL + STAGE 3: SIGNAL BOOSTING
     candidates = {}
 
     for course_name, course_emb in (embeddings_data or {}).items():
@@ -465,42 +430,30 @@ def find_course_by_skill(
             continue
 
         key = course_name.strip().lower()
+        course_tokens = tokenize(key)
 
-        # semantic similarity
         sim = cosine(skill_emb, course_emb)
         sim = norm(sim)
 
-        # HARD FILTER (crucial for noise removal)
         if sim < 0.33:
             continue
 
-        score = sim  # base semantic score
+        score = sim
 
-        # =========================
-        # STAGE 3: SIGNAL BOOSTING (NO OVERPOWERING)
-        # =========================
-
-        course_tokens = tokenize(key)
-
-        # 1. lexical overlap (VERY IMPORTANT FIX)
         overlap = len(skill_tokens & course_tokens)
         score += overlap * 0.06
 
-        # 2. exact seed boost
         if key in seed:
             score += 0.22
 
-        # 3. substring relevance
         if skill in key:
             score += 0.18
 
-        # 4. penalty for generic/noisy titles
         if len(course_tokens) < 3:
             score -= 0.05
         if "introduction" in key and overlap == 0:
             score -= 0.07
 
-        # clamp score
         score = max(0.0, min(1.0, score))
 
         candidates[key] = {
@@ -508,24 +461,16 @@ def find_course_by_skill(
             "score": score
         }
 
-    # =========================
     # STAGE 4: GLOBAL RE-RANKING
-    # =========================
     results = list(candidates.values())
 
-    # stability boost: prefer higher semantic purity
     for r in results:
         name = r["name"].lower()
-
-        # slight penalty for off-domain drift
         if skill not in name and len(skill_tokens & tokenize(name)) == 0:
             r["score"] *= 0.98
 
     results.sort(key=lambda x: x["score"], reverse=True)
 
-    # =========================
-    # OUTPUT
-    # =========================
     return [
         {
             "name": r["name"],
@@ -633,9 +578,6 @@ def _get_candidate_courses_for_skill(
     ranked = sorted(filtered, key=lambda item: hybrid_score(item['name']))
 
     return [item['name'] for item in ranked[:top_n]]
-
-
-
 
 def _infer_prereq_skills_for_topic(
     topic: str,
@@ -805,6 +747,9 @@ def generate_paths(
     avoid_categories: Optional[List[str]] = None,
     user_prefs: Optional[List[str]] = None,
     criterion_name: Optional[str] = None,
+    course_index: Optional[Dict[str, Dict]] = None,
+    skill_index: Optional[Dict[str, Set[str]]] = None,
+    embeddings_data: Optional[Dict[str, List[float]]] = None,
     experiment: bool = False
 ) -> List[Dict]:
     """Generate ranked learning paths from initial skills toward an objective.
@@ -816,16 +761,16 @@ def generate_paths(
     Final plans are sorted by the active criterion so the best path
     for the user's goal always appears first.
     """
-    if not courses:
+    if not courses and not course_index:
         return []
 
     initial_skills = initial_skills or []
     user_prefs = user_prefs or []
     criterion = criterion_name if criterion_name else 'Balanced path'
 
-    course_index = index_courses(courses)
-    skill_index = build_skill_index(courses)
-    embeddings_data = _load_embeddings_data(experiment)
+    course_index = course_index or index_courses(courses)
+    skill_index = skill_index or build_skill_index(courses)
+    embeddings_data = embeddings_data if embeddings_data is not None else _load_embeddings_data(experiment)
 
     target_courses = _get_candidate_courses_for_skill(
         skill=objective,
