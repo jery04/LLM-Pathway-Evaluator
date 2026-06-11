@@ -25,6 +25,9 @@ from dataclasses import dataclass, field    # Defines structured data classes (C
 # Import LLM adapter for prerequisite inference and embeddings
 from llm_adapter import infer_prerequisites_for_objective, get_text_embedding
 
+# Import STRIPS planner for path refinement using classical AI planning (BFS/A*)
+from strips_search import refine_paths_with_planner
+
 # Global thresholds for similarity-based matching
 SIMILARITY_THRESHOLD = 0.75
 CATEGORY_SIMILARITY_THRESHOLD = 0.6
@@ -760,7 +763,8 @@ def generate_paths(
     course_index: Optional[Dict[str, Dict]] = None,
     skill_index: Optional[Dict[str, Set[str]]] = None,
     embeddings_data: Optional[Dict[str, List[float]]] = None,
-    experiment: bool = False
+    experiment: bool = False,
+    use_strips_planner: bool = True 
 ) -> List[Dict]:
     """Generate ranked learning paths from initial skills toward an objective.
 
@@ -869,4 +873,13 @@ def generate_paths(
 
     plans.sort(key=_plan_sort_key)
 
+    if use_strips_planner and plans:
+        plans = refine_paths_with_planner(
+            paths=plans,
+            initial_skills=initial_skills,
+            objective=objective,
+            course_index=course_index or index_courses(courses),
+            use_strips=True
+        )
+    
     return plans

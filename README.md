@@ -38,7 +38,8 @@ LLM Pathway Evaluator/
 │   ├── app.py                  # Streamlit UI for pathway exploration
 │   ├── download_dataset.py     # Kaggle dataset download and normalization
 │   ├── llm_adapter.py          # LLM / spaCy adapter for embeddings and explanations
-│   └── planner.py              # Path planning and course modeling logic
+│   ├── planner.py              # Path planning and course modeling logic
+│   └── strips_search.py        # STRIPS based search for course path planning
 ├── tests/                      # Unit tests for core logic
 └── .gitignore
 ```
