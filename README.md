@@ -24,6 +24,7 @@ LLM Pathway Evaluator/
 ├── README.md                   # Project documentation
 ├── requirements.txt            # Python dependencies
 ├── .env                        # Environment variables for API keys and config
+├── Alternative Career Paths Report.pdf  # Project PDF report
 ├── data/
 │   ├── embedding.json          # Cached course embeddings
 │   ├── normalized_courses.json # Normalized course metadata
@@ -32,6 +33,7 @@ LLM Pathway Evaluator/
 │       ├── dataset_2.csv
 │       └── ...
 ├── previews/                   # UI preview images shown in README
+├── experiments/                # Experimental test cases and quality tests
 ├── src/
 │   ├── app.py                  # Streamlit UI for pathway exploration
 │   ├── download_dataset.py     # Kaggle dataset download and normalization
@@ -123,7 +125,7 @@ Step-by-step: how to obtain a Gemini API key (Google Generative AI):
 > Note: If you use Generative AI Studio (https://console.generativeai.google), the interface and flow may differ slightly; look for "Credentials" or "API keys" in that interface.
 
 
-### 6. Run Tests
+### 6. Run Tests 📋
 
 To verify that all dependencies and setup steps are correct, run the project test harness with the following command:
 
@@ -140,6 +142,27 @@ After creating the `.env` file with your API key, run the following command (ins
 ```bash
 streamlit run src/app.py
 ```
+
+## Experiment 🧪
+
+In the `experiments/` folder, a specific forced-condition test case was created to evaluate the response quality of the system. It contains a deliberately crafted set of courses designed to stress-test the recommendation engine across all three supported optimization criteria:
+
+- **Fastest Path** – minimizes time to completion
+- **Cheapest Path** – minimizes total cost
+- **Balanced Path** – optimizes for both time and cost
+
+The test dataset was intentionally constructed (not sampled from real data) to expose edge cases and verify that each routing strategy produces semantically correct and distinguishable recommendations.
+
+### Running the Quality Test
+
+To execute the experiment, run the following command from the project root:
+
+```bash
+python -m experiments.quality_test
+```
+
+This will run the full quality evaluation suite against all three path criteria and output the results for manual or automated inspection.
+
 
 ## Key Dependencies 📘
 

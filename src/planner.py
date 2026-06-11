@@ -296,6 +296,11 @@ def _cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
     return dot_product / math.sqrt(norm1_sq * norm2_sq)
 
 def _is_skill_covered(skill: str, known_skills: List[str]) -> bool:
+    """Return True if a skill is already covered by known skills.
+
+    Uses lexical matching first and falls back to embedding similarity
+    when necessary to determine semantic overlap.
+    """
     s = _normalize_token(skill)
     if not s:
         return True
@@ -326,7 +331,10 @@ def _passes_category_filter(
     avoid_categories: Optional[List[str]],
     embeddings: Dict[str, List[float]]
 ) -> bool:
-    """Reject courses whose embeddings are too close to avoided categories."""
+    """Reject courses that match avoided categories by name or embedding similarity.
+
+    This preserves course selection quality when users ask to avoid entire topics.
+    """
 
     if not avoid_categories:
         return True
@@ -583,7 +591,10 @@ def _infer_prereq_skills_for_topic(
     topic: str,
     cache: Dict[str, List[str]],
 ) -> List[str]:
-    """Infer prerequisite skills for a topic using existing LLM adapter function."""
+    """Infer prerequisite skills for a topic using the LLM adapter.
+
+    Caches results by normalized topic to avoid repeated LLM calls.
+    """
     normalized_topic = _normalize_token(topic)
     if not normalized_topic:
         return []
@@ -612,9 +623,9 @@ def _infer_prereq_skills_for_course(
     course: Dict,
     prereq_cache: Dict[str, List[str]],
 ) -> List[str]:
-    """Infer direct prerequisite skills for a course.
+    """Infer direct prerequisite skills needed before taking a course.
 
-    Beginner courses are considered foundational and return no dependencies.
+    Treats beginner-level courses as foundational with no prerequisites.
     """
     level = _normalize_token(course.get('level') or '')
     if 'beginner' in level:
@@ -651,11 +662,10 @@ def _resolve_route_for_target_course(
     prereq_cache: Dict[str, List[str]],
     visited: Optional[Set[str]] = None,
 ) -> Optional[CourseNode]:
-    """Recursively resolve prerequisites and build a CourseNode tree.
+    """Recursively resolve prerequisites and build a course dependency tree.
 
-    Each recursive call receives its own local visited copy so that
-    sibling prerequisite branches don't block each other. The caller
-    is responsible for tracking cross-path deduplication separately.
+    Returns a CourseNode subtree rooted at the target course, including
+    children for inferred prerequisite courses and unresolved skills.
     """
     if visited is None:
         visited = set()
