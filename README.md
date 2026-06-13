@@ -197,6 +197,15 @@ A typical generated pathway might look like this:
   <img src="./previews/post4.png" alt="Program running preview" width="45%"/>
 </p>
 
+The following images correspond to the simulation section:
+<p align="center">
+  <img src="./previews/simulation_post1.png" alt="Simulation 1" width="45%"/>
+  <img src="./previews/simulation_post2.png" alt="Simulation 2" width="45%"/>
+  <br/><br/>
+  <img src="./previews/simulation_post3.png" alt="Simulation 3" width="45%"/>
+  <img src="./previews/simulation_post4.png" alt="Simulation 4" width="45%"/>
+</p>
+
 ---
 
 <p align="center">Built with ❤️ by a human</p>
