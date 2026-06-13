@@ -11,6 +11,7 @@ from typing import List                # type hint for lists
 from html import escape                # sanitize HTML output
 from urllib.parse import quote_plus    # URL encode strings
 from concurrent.futures import ThreadPoolExecutor  # parallel LLM calls
+import simulation as sim
 
 # Load data, generate paths, and call LLM for explanations
 from planner import index_courses, load_courses, generate_paths, build_skill_index, _load_embeddings_data  
@@ -319,7 +320,7 @@ def main():
     default_skills = 'python'
     with st.form('input_form'):
         user_text = st.text_area(
-            'Describe your goal (eg: "I want to learn web design as fast as possible")',
+            'Describe your goal',
             height=120,
             placeholder='I want to learn web design...'
         )
@@ -392,49 +393,210 @@ def main():
             st.session_state.full_comparison_explanation = full_comparison_explanation
             st.session_state.user_skills = user_skills
 
-        if st.session_state.get('generation_complete', False):
-            goal = st.session_state.goal
-            paths = st.session_state.paths
-            brief_explanations = st.session_state.brief_explanations
-            full_comparison_explanation = st.session_state.full_comparison_explanation
+    if st.session_state.get('generation_complete', False):
+        goal = st.session_state.goal
+        paths = st.session_state.paths
+        brief_explanations = st.session_state.brief_explanations
+        full_comparison_explanation = st.session_state.full_comparison_explanation
 
-            st.caption(f'Detected goal: {goal or "not detected"}')
+        st.caption(f'Detected goal: {goal or "not detected"}')
 
-            if not paths:
-                st.warning('No valid paths were found. Adjust the goal, constraints, or existing skills.')
-            else:
-                for i, p in enumerate(paths, 1):
-                    target = p.get('target_course') or goal
-                    criterion = f'Path {i}'
-                    st.subheader(f"{criterion}: {' → '.join(p['path'])}")
-                    if target:
-                        st.caption(target)
-                    m = p['metrics']
-                    st.caption(f"Total time: {m['total_months']} months | Cost: ${m['total_cost']} | Average difficulty: {m['avg_difficulty']}")
+        if not paths:
+            st.warning('No valid paths were found. Adjust the goal, constraints, or existing skills.')
+        else:
+            for i, p in enumerate(paths, 1):
+                target = p.get('target_course') or goal
+                criterion = f'Path {i}'
+                st.subheader(f"{criterion}: {' → '.join(p['path'])}")
+                if target:
+                    st.caption(target)
+                m = p['metrics']
+                st.caption(f"Total time: {m['total_months']} months | Cost: ${m['total_cost']} | Average difficulty: {m['avg_difficulty']}")
 
-                    if i - 1 < len(brief_explanations):
-                        st.caption(brief_explanations[i - 1])
-                    _render_course_buttons(p['path'], course_index)
+                if i - 1 < len(brief_explanations):
+                    st.caption(brief_explanations[i - 1])
+                _render_course_buttons(p['path'], course_index)
 
-                comparison_text = full_comparison_explanation or 'La comparación se generará aquí una vez que termine el análisis.'
-                comparison_text = escape(comparison_text)
-                comparison_text = re.sub(
-                    r'\*\*(.+?)\*\*',
-                    r'<span style="color:#8ab8ff;font-weight:700;">\1</span>',
-                    comparison_text,
-                )
-                comparison_text = comparison_text.replace('\n', '<br>')
-                st.markdown(
-                    f"""
-                    <div class="comparison-card">
-                        <h2>Qualitative comparison (LLM)</h2>
-                        <div style="font-size: 1rem; color: rgba(230,230,240,0.95); line-height:1.75;">
-                            {comparison_text}
-                        </div>
+            comparison_text = full_comparison_explanation or 'La comparación se generará aquí una vez que termine el análisis.'
+            comparison_text = escape(comparison_text)
+            comparison_text = re.sub(
+                r'\*\*(.+?)\*\*',
+                r'<span style="color:#8ab8ff;font-weight:700;">\1</span>',
+                comparison_text,
+            )
+            comparison_text = comparison_text.replace('\n', '<br>')
+            st.markdown(
+                f"""
+                <div class="comparison-card">
+                    <h2>Qualitative comparison (LLM)</h2>
+                    <div style="font-size: 1rem; color: rgba(230,230,240,0.95); line-height:1.75;">
+                        {comparison_text}
                     </div>
-                    """,
-                    unsafe_allow_html=True,
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # -------------------------
+            # Simulation section (interactive viewer)
+            # -------------------------
+            st.header('Simulation')
+            st.caption('Monte Carlo simulation — statistically estimates completion rates, time ranges, and dropout risks for each learning path.')
+
+            with st.expander('Simulation controls'):
+                n_simulations = st.slider('Number of simulations', 100, 5000, 500, step=100)
+                hours_per_week = st.slider('Hours of study per week', 5, 40, 15)
+                profile = st.selectbox('Profile de estudiante', ['Principiante', 'Intermedio', 'Avanzado', 'Trabajador'])
+                fatigue_tolerance = st.slider('Tolerancia a la fatiga', 0.05, 0.5, 0.15, step=0.01)
+                dropout_tolerance = st.slider('Dropout tolerance', 0.05, 0.5, 0.2, step=0.01)
+                run_sim = st.button('Run simulation')
+
+            if run_sim:
+                paths_to_sim = st.session_state.get('paths') or []
+
+                # Map UI controls to LearningParameters
+                if profile == 'Principiante':
+                    mu, sigma, weekly_scale = 2.2, 0.6, 0.8
+                elif profile == 'Intermedio':
+                    mu, sigma, weekly_scale = 2.0, 0.5, 1.0
+                elif profile == 'Avanzado':
+                    mu, sigma, weekly_scale = 1.7, 0.4, 1.2
+                else:  # Trabajador
+                    mu, sigma, weekly_scale = 1.9, 0.45, 1.5
+
+                params = sim.LearningParameters(
+                    learning_rate_mu=mu,
+                    learning_rate_sigma=sigma,
+                    weekly_capacity_lambda=max(1, int(hours_per_week * weekly_scale)),
+                    fatigue_multiplier=float(fatigue_tolerance),
+                    dropout_scale=float(20 * (1 + dropout_tolerance * 4)),
                 )
+
+                with st.spinner('Running simulations...'):
+                    ui_data = sim.get_simulation_ui_data(course_index, paths_to_sim, params, n_simulations)
+
+                results = ui_data.get('results', [])
+                if not results:
+                    st.warning('No simulation results were produced.')
+                else:
+                    df = sim.create_comparison_table(results)
+                    # Ensure df is shown in path_index order for clarity
+                    if 'path_index' in df.columns:
+                        df = df.sort_values('path_index')
+                    st.subheader('Comparison between paths')
+                    st.dataframe(df)
+
+                    # Completion rate bar chart
+                    st.subheader('Completion rate by path')
+                    comp_series = df.set_index('path_name')['completion_rate']
+                    st.bar_chart(comp_series)
+
+                    # Aggregate across all paths: combine completion times and show overall statistics
+                    combined_times = []
+                    for r in results:
+                        try:
+                            t = getattr(r, 'completion_times')
+                        except Exception:
+                            try:
+                                t = r.get('completion_times', [])
+                            except Exception:
+                                t = []
+                        if t:
+                            combined_times.extend(list(t))
+
+                    if combined_times:
+                        st.subheader('Completion time distribution — All paths')
+                        try:
+                            fig = sim.plot_time_distribution(combined_times, 'All paths')
+                            st.pyplot(fig)
+                        except Exception:
+                            pass
+
+                        try:
+                            fig_box = sim.plot_time_boxplot(combined_times, 'All paths')
+                            st.pyplot(fig_box)
+                        except Exception:
+                            pass
+
+                        try:
+                            fig_cdf = sim.plot_time_cdf(combined_times, 'All paths')
+                            st.pyplot(fig_cdf)
+                        except Exception:
+                            pass
+                    else:
+                        st.info('No completion time data available to show aggregated distributions.')
+
+                    # Aggregate course failure statistics and show useful summaries
+                    bottlenecks = ui_data.get('course_bottlenecks', {})
+                    if bottlenecks:
+                        import pandas as _pd
+                        # `bottlenecks` stores estimated failure probability per course
+                        fail_df = _pd.Series(bottlenecks).rename('failure_rate').to_frame()
+                        fail_df['success_rate'] = 1.0 - fail_df['failure_rate']
+                        fail_df = fail_df.sort_values('failure_rate', ascending=False)
+
+                        st.subheader('Top courses by estimated failure rate')
+                        # Show top 10 courses most likely to cause failures
+                        st.table(fail_df.head(10).style.format({ 'failure_rate': '{:.1%}', 'success_rate': '{:.1%}' }))
+
+                        st.subheader('Failure / Success rates (all courses)')
+                        # Provide a compact bar chart of failure rates for the worst courses
+                        st.bar_chart(fail_df['failure_rate'].head(20))
+
+                        # Also expose a downloadable CSV for further inspection
+                        try:
+                            csv_bytes = fail_df.reset_index().to_csv(index=False).encode('utf-8')
+                            st.download_button('Download course failure rates (CSV)', data=csv_bytes, file_name='course_failure_rates.csv', mime='text/csv')
+                        except Exception:
+                            pass
+
+                    # Aggregate fatigue risk (show median/mean across paths)
+                    fatigue_vals = []
+                    for r in results:
+                        try:
+                            fatigue_vals.append(float(getattr(r, 'fatigue_risk', 0.0)))
+                        except Exception:
+                            try:
+                                fatigue_vals.append(float(r.get('fatigue_risk', 0.0)))
+                            except Exception:
+                                pass
+
+                    if fatigue_vals:
+                        import statistics as _st
+                        mean_fatigue = _st.mean(fatigue_vals)
+                        display_progress = min(1.0, max(0.01, mean_fatigue))
+                        st.subheader('Fatigue risk (aggregated)')
+                        col1, col2 = st.columns([1, 2])
+                        with col1:
+                            st.metric('Mean fatigue risk', f"{mean_fatigue:.2%}")
+                        with col2:
+                            st.progress(display_progress)
+
+                    # Additional aggregated stats
+                    st.subheader('Additional aggregated statistics')
+                    stats_col1, stats_col2, stats_col3 = st.columns(3)
+                    with stats_col1:
+                        st.metric('Avg completion', f"{ui_data['summary_stats']['avg_completion_rate']:.1%}")
+                    with stats_col2:
+                        st.metric('Avg time (weeks)', f"{ui_data['summary_stats']['avg_time_weeks']:.1f}")
+                    with stats_col3:
+                        st.metric('Avg dropout', f"{ui_data['summary_stats']['avg_dropout_prob']:.1%}")
+                    
+                    # Dropout distribution across paths
+                    try:
+                        dropouts = [r.get('dropout_prob', None) if isinstance(r, dict) else getattr(r, 'dropout_prob', None) for r in results]
+                        dropouts = [d for d in dropouts if d is not None]
+                        if dropouts:
+                            st.subheader('Dropout probability distribution (per simulation result)')
+                            import numpy as _np
+                            hist_vals = _np.histogram(dropouts, bins=10)
+                            # show a simple dataframe for bins
+                            bins = [f"{hist_vals[1][i]:.2f}-{hist_vals[1][i+1]:.2f}" for i in range(len(hist_vals[1])-1)]
+                            bin_df = _pd.DataFrame({'bin': bins, 'count': list(hist_vals[0])})
+                            st.table(bin_df)
+                            st.bar_chart(_pd.Series(dropouts).rename('dropout_prob'))
+                    except Exception:
+                        pass
 
 if __name__ == '__main__':
     main()

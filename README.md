@@ -39,6 +39,7 @@ LLM Pathway Evaluator/
 │   ├── download_dataset.py     # Kaggle dataset download and normalization
 │   ├── llm_adapter.py          # LLM / spaCy adapter for embeddings and explanations
 │   ├── planner.py              # Path planning and course modeling logic
+│   ├── simulation.py           # Simulation runner for pathway evaluation
 │   └── strips_search.py        # STRIPS based search for course path planning
 ├── tests/                      # Unit tests for core logic
 └── .gitignore
@@ -135,7 +136,7 @@ Step-by-step: how to obtain a Gemini API key (Google Generative AI):
 To verify that all dependencies and setup steps are correct, run the project test harness with the following command:
 
 ```bash
-python src/tests_runner.py
+python tests/tests_runner.py
 ```
 
 > Note: if any test fails, review the previous installation and setup steps before proceeding.

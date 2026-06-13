@@ -169,19 +169,6 @@
     "skills": ["Regression", "Classification", "Train/Test Split", "Random Forest"],
     "link": "https://www.kaggle.com/learn/intro-to-machine-learning"
   },
-
-
-
-
-  
-
-
-
-
-
-
-
-
   {
     "name": "Zero to Python in 2 Weeks",
     "duration_months": 0.5,
@@ -322,21 +309,6 @@
     "skills": ["End-to-end Pipeline", "Model Deployment", "Kaggle Competitions"],
     "link": "https://www.udacity.com/course/data-scientist-nanodegree--nd025"
   },
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   {
     "name": "Python for Everybody (University of Michigan)",
     "duration_months": 1,

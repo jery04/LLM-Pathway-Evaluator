@@ -6,6 +6,9 @@ kagglehub
 kagglesdk
 numpy
 scipy
+pandas
+matplotlib
+seaborn
+python-dotenv
 es-core-news-md
 en-core-web-md
-python-dotenv
